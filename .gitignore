@@ -46,6 +46,8 @@ modules/pki/output/
 modules/services/secrets/kubernetes/encryption-config.yaml
 # ❌ NEVER commit: plaintext private keys, decrypted files, or raw secrets
 # ── Nix ───────────────────────────────────────────────────────────
+# Nix build output — accidentally committed stubs in initial snapshot
+$out/
 node_modules/
 *.orig
 # Other plaintext secret patterns

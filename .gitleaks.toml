@@ -1,0 +1,27 @@
+# Gitleaks config for Reverb-OS (public repo).
+# The 2026-08-16 public-flip audit found plaintext secrets; the current tree
+# was purged and this gate added. Real secret VALUES were redacted from
+# docs/archives; the rules below scope out documentation/test files that
+# legitimately show API usage patterns (curl auth headers, fake test keys,
+# example key material). Everything outside these paths still fails hard.
+title = "Reverb-OS gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation, tests, and archived reference files showing API patterns (values redacted)"
+paths = [
+  # Docs that legitimately show curl -H "Authorization: Bearer <redacted>" usage
+  '''docs/cloudflare/CLOUDFLARE_TUNNEL_FIX_COMPLETE\.md''',
+  '''docs/cloudflare-free-tier-optimizations\.md''',
+  '''docs/archive/legacy/ARCHIVE/PRIVACY-FILTER-GAP-ANALYSIS\.md''',
+  '''docs/archive/legacy/ARCHIVE/SECRET-ROTATION-SCHEDULE\.md''',
+  # Unit tests using fake key material
+  '''modules/services/ai-inference/ai_inference_gateway/tests/test_pii_redactor\.py''',
+  '''modules/services/ai-inference/README\.md''',
+  # Skill reference docs (example key material)
+  '''skills/kubernetes-specialist/references/configuration\.md''',
+  # K8s TLS secret DECLARATIONS (no plaintext values)
+  '''kubernetes-manifests/istio-zephyr\.yaml''',
+]

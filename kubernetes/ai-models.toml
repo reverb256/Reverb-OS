@@ -1,0 +1,212 @@
+# AI Model Registry - Single Source of Truth
+# Last Updated: 2026-05-20
+
+[defaults]
+primary = "nemotron-3-nano"
+fallback = "gemma-2b"
+disabled_models = [
+  "meta/llama-3.1-405b-instruct","deepseek-ai/deepseek-coder-6.7b-instruct",
+  "moonshotai/kimi-k2-instruct","moonshotai/kimi-k2-thinking",
+  "mistralai/devstral-2-123b-instruct-2512","mistralai/magistral-small-2026",
+  "bytedance-seed/dola-seed-2.0-pro:free","x-ai/grok-code-fast-1:optimized:free",
+  "nvidia/llama-3.1-nemotron-70b", "moonshotai/kimi-k2.5",
+  "microsoft/phi-4",
+  "qwen/qwen3-coder-plus","qwen/qwen3-coder-next","qwen/qwen3-coder-flash",
+  "qwen/qwen3-coder-30b-a3b-instruct","qwen/qwen3.5-35b-a3b","qwen/qwen3.5-27b",
+  "qwen/qwen3.5-9b","qwen/qwen3.5-plus-20260420"
+]
+
+[models]
+# ── NVIDIA NIM (Unlimited / Primary) ──────────────────────────────────
+[models.nemotron-3-super]
+name = "nvidia/nemotron-3-super-120b-a12b"
+description = "Nemotron 3 Super — Primary High-IQ"
+context_length = 262144
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["nvidia-nim"]
+
+[models.nemotron-3-nano]
+name = "nvidia/nemotron-3-nano-30b-a3b"
+description = "Nemotron 3 Nano — Fast High-IQ"
+context_length = 262144
+capabilities = ["chat", "completion"]
+backends = ["nvidia-nim"]
+
+[models.nemotron-omni]
+name = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+description = "Nemotron 3 Nano Omni — Vision/Audio/Reasoning"
+context_length = 256000
+capabilities = ["chat", "completion", "vision", "audio", "reasoning"]
+backends = ["nvidia-nim"]
+
+# ── GOOGLE GEMMA (Fast / Privacy-Conscious) ──────────────────────────
+# STRICT: Only Gemma models. No Gemini.
+[models.gemma-4-31b]
+name = "google/gemma-4-31b-it"
+description = "Gemma 4 31B — Fast, high-quality"
+context_length = 131072
+capabilities = ["chat", "completion", "coding"]
+backends = ["google"]
+
+[models.gemma-4-26b]
+name = "google/gemma-4-26b-a4b-it"
+description = "Gemma 4 26B — Efficient high-quality"
+context_length = 131072
+capabilities = ["chat", "completion", "coding"]
+backends = ["google"]
+
+[models.gemma-3-12b]
+name = "google/gemma-3-12b-it"
+description = "Gemma 3 12B — Fast and lightweight"
+context_length = 131072
+capabilities = ["chat", "completion"]
+backends = ["google"]
+
+[models.gemma-3-4b]
+name = "google/gemma-3-4b-it"
+description = "Gemma 3 4B — Ultra-fast"
+context_length = 131072
+capabilities = ["chat", "completion"]
+backends = ["google"]
+
+[models.gemma-2b]
+name = "google/gemma-2b"
+description = "Gemma 2B — Baseline fast"
+context_length = 131072
+capabilities = ["chat", "completion"]
+backends = ["google"]
+
+# ── LOCAL MODELS (Private / Baseline) ────────────────────────────────
+[models.local-qwen-4b]
+name = "Qwen3.5-4B-Q4_K_M.gguf"
+description = "Local Qwen 3.5 4B (Sentry)"
+context_length = 131072
+capabilities = ["chat", "completion"]
+backends = ["llama-sentry"]
+
+[models.local-qwen-2b]
+name = "qwen3.5-2b-awq"
+description = "Local Qwen 3.5 2B vLLM (Nexus)"
+context_length = 131072
+capabilities = ["chat", "completion", "fast"]
+backends = ["llama-vllm-3060ti"]
+
+[models.local-qwen-27b]
+name = "Qwen3.5-27B-Q4_K_M.gguf"
+description = "Local Qwen 3.6 27B (Zephyr)"
+context_length = 262144
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["llama-zephyr-3090"]
+
+[models.local-qwen-35b]
+name = "Carnice-Qwen3.6-MoE-35B-A3B.IQ4_XS.gguf"
+description = "Local Qwen 3.6 35B MoE (Zephyr)"
+context_length = 262144
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["llama-zephyr-3090"]
+
+# ── OPENCODE ZEN (Daily Reset 7PM) ────────────────────────────────────
+[models.deepseek-v4-flash-zen]
+name = "deepseek-v4-flash"
+description = "DeepSeek V4 Flash — OpenCode Zen Free"
+context_length = 1048576
+capabilities = ["chat", "completion", "coding"]
+backends = ["opencode-zen"]
+
+# ── xAI Grok (direct OAuth) ─────────────────────────────────────────
+[models.grok-4.20-reasoning]
+name = "grok-4.20-0309-reasoning"
+description = "Grok-4.20 Reasoning (xAI)"
+context_length = 256000
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["xai"]
+
+[models.grok-4.20-non-reasoning]
+name = "grok-4.20-0309-non-reasoning"
+description = "Grok-4.20 Non-Reasoning (xAI)"
+context_length = 256000
+capabilities = ["chat", "completion"]
+backends = ["xai"]
+
+[models.grok-4.3]
+name = "grok-4.3"
+description = "Grok-4.3 (xAI)"
+context_length = 256000
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["xai"]
+
+[models.grok-build-0.1]
+name = "grok-build-0.1"
+description = "Grok Build 0.1 (xAI)"
+context_length = 256000
+capabilities = ["chat", "completion"]
+backends = ["xai"]
+
+[models.grok-4.20-multi-agent]
+name = "grok-4.20-multi-agent-0309"
+description = "Grok-4.20 Multi-Agent (xAI)"
+context_length = 256000
+capabilities = ["chat", "completion", "reasoning"]
+backends = ["xai"]
+
+[models.grok-imagine-image]
+name = "grok-imagine-image"
+description = "Grok Imagine Image (xAI)"
+context_length = 0
+capabilities = ["image"]
+backends = ["xai"]
+
+[models.grok-imagine-image-quality]
+name = "grok-imagine-image-quality"
+description = "Grok Imagine Image Quality (xAI)"
+context_length = 0
+capabilities = ["image"]
+backends = ["xai"]
+
+[models.grok-imagine-video]
+name = "grok-imagine-video"
+description = "Grok Imagine Video (xAI)"
+context_length = 0
+capabilities = ["video"]
+backends = ["xai"]
+
+[backends]
+# ── NIM Backend ──────────────────────────────────────────────────────
+[backends.nvidia-nim]
+type = "nvidia-nim"
+url = "https://integrate.api.nvidia.com/v1"
+host = "external"
+models = ["nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
+
+# ── Google Backend (via AI Gateway) ──────────────────────────────────
+[backends.google]
+type = "openai-compatible"
+url = "http://ai-inference-gateway.ai-inference.svc.cluster.local:8080/v1"
+host = "cluster"
+models = ["google/gemma-4-31b-it", "google/gemma-4-26b-a4b-it", "google/gemma-3-12b-it", "google/gemma-3-4b-it", "google/gemma-2b"]
+
+# ── OpenCode Zen Backend ──────────────────────────────────────────────
+[backends.opencode-zen]
+type = "openai-compatible"
+url = "http://ai-inference-gateway.ai-inference.svc.cluster.local:8080/v1"
+host = "cluster"
+models = ["deepseek-v4-flash"]
+
+# ── Local Backends ───────────────────────────────────────────────────
+[backends.llama-vllm-3060ti]
+type = "vllm"
+url = "http://10.1.1.120:8040/v1"
+host = "nexus"
+gpu = "RTX 3060 Ti 8GB"
+
+[backends.llama-zephyr-3090]
+type = "llama-cpp"
+url = "http://10.1.1.110:1237/v1"
+host = "zephyr"
+gpu = "RTX 3090 24GB"
+
+[backends.llama-sentry]
+type = "llama-cpp"
+url = "http://10.1.1.140:1235/v1"
+host = "sentry"
+gpu = "Radeon RX 5600 XT 6GB (Vulkan)"

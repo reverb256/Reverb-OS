@@ -1,0 +1,133 @@
+{
+  config,
+  pkgs,
+  lib,
+  inputs,
+  ...
+}: let
+  cluster = config.networking.cluster;
+in {
+  services = {
+    keepalived-vip = {
+      enable = true;
+      vip = cluster.kubernetes.vip;
+      interface = "eth0";
+      priority = 90;
+    };
+
+    # NOTE: hermes-cli / hermes-a2a live in hosts/forge/configuration.nix
+    # (the live services attrset). THIS FILE IS NOT IMPORTED — see the
+    # k3s-cluster encryption-key comment there.
+
+    k3s-cluster = {
+      enable = true;
+      nvidia.enable = true;
+      role = "agent";
+      nodeName = "forge";
+      serverAddr = "https://${cluster.kubernetes.vip}:${toString cluster.kubernetes.apiPort}";
+      tokenFile = "/run/secrets/k3s-cluster-token";
+      nodeIP = cluster.hosts.forge.ip;
+      secretsEncryptionKeyFile = "/run/secrets/k3s-encryption-key";
+    };
+
+    spotify-spotx.enable = true;
+
+    opencode.enable = true;
+
+    # Agent network restrictions — restrict AI agents to allowed destinations only
+
+    nixos-auto-update = {
+      enable = true;
+      interval = "daily";
+      updateFlakeInputs = ["nixpkgs"];
+    };
+
+    sops-secrets-registry = {
+      enable = true;
+      kubernetes = true;
+      aiServices = true;
+    };
+
+    chatterbox-tts = {
+      enable = true;
+      user = "j_kro";
+      group = "users";
+    };
+  };
+
+  services.cluster-mesh.enable = true; # SSH service account for inter-node mesh
+  environment.systemPackages = with pkgs; [
+    rocmPackages.rocm-smi
+    clinfo
+    nvtopPackages.full
+    inputs.claude-native.packages.x86_64-linux.claude
+  ];
+
+  # 2026-08-06 recovery: rocblas/hipblas/hipsparse/rocfft/rocrand/rocthrust
+  # dropped (Tensile multi-hour build); forge mining needs OpenCL only.
+  programs.nix-ld.libraries = with pkgs; [
+    rocmPackages.clr
+    rocmPackages.clr.icd
+    rocmPackages.rocminfo
+    rocmPackages.rocm-smi
+    rocmPackages.rocm-runtime
+    ocl-icd
+    opencl-headers
+    clinfo
+    libGL
+    libGLU
+    libglvnd
+    vulkan-loader
+    nvidia-vaapi-driver
+    zlib
+    libpng
+    libjpeg
+    freetype
+    fontconfig
+    libx11
+    libxext
+    libxrender
+    libxcb
+    libxau
+    libxdmcp
+    SDL2
+    alsa-lib
+    systemd
+    libusb1
+    curl
+    openssl
+  ];
+
+  # Initrd SSH recovery + BTRFS snapshots
+  services.cluster-ca = {
+    enable = true;
+    generateLeaf = false;
+  };
+
+  services.initrd-ssh-recovery = {
+    enable = true;
+    interface = "eth0";
+    networkDriver = "r8169";
+    port = 2222;
+  };
+  services.recovery-specialisation.enable = true;
+  services.btrfs-boot-snapshot.enable = false; # removed snapshotting
+
+  services.cachix-auth.enable = true;
+  services.ai-coding-tools = {
+    enable = true;
+    user = "j_kro";
+    context7ApiKeyFile = "/run/secrets/context7-api-key";
+    nvidiaNimApiKeyFile = "/run/secrets/nvidia-api-key";
+    opencodeGoApiKeyFile = "/run/secrets/opencode-go-api-key";
+    tools = {
+      claude = {enable = true;};
+      opencode = {enable = true;};
+      droid = {enable = true;};
+      crush = {enable = true;};
+      pi = {enable = true;};
+      omp = {enable = true;};
+    };
+    enableShellEnv = true;
+  };
+}

@@ -1,0 +1,38 @@
+# Shared mining resources module; host-specific PeakMiner services are declared separately.
+# v2: clean structure; legacy miners were removed.
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+with lib; let
+  cfg = config.services.mining;
+  body = {
+    options.services.mining = {
+      enable = mkEnableOption "Shared mining resources";
+      user = mkOption {
+        type = types.str;
+        default = "mining";
+        description = "User to run mining services as";
+      };
+    };
+
+    config = mkIf cfg.enable {
+      users.users.${cfg.user} = {
+        isSystemUser = true;
+        group = "mining";
+        extraGroups = ["video" "render"];
+      };
+      users.groups.mining = {};
+
+      boot.kernel.sysctl."vm.nr_hugepages" = 1280;
+
+      systemd.tmpfiles.rules = [
+        "d /var/lib/mining 0750 ${cfg.user} mining -"
+        "d /var/log/mining 0750 ${cfg.user} mining -"
+      ];
+    };
+  };
+in
+  body

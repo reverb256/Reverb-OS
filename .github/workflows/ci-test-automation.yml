@@ -1,0 +1,115 @@
+---
+name: CI Test Automation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-test-automation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ============================================================================
+  # Comprehensive test suite with coverage reporting
+  # ============================================================================
+
+  test-coverage:
+    name: Test Coverage
+    runs-on: [self-hosted, nixos]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        # pin:actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Run all Nix tests with coverage
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Running comprehensive test suite..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          PASS=0
+          FAIL=0
+          SKIP=0
+          RESULTS=""
+
+          for test in tests/*.nix; do
+            test_name=$(basename "$test" .nix)
+            echo ""
+            echo "▶ $test_name"
+
+            # Skip lib.nix (helper, not a test) and lix-vm.nix (NixOS VM
+            # test built via `nix build .#lix-vm-test`, needs `inputs` arg —
+            # not a source-level test).
+            if [ "$test_name" = "lib" ] || [ "$test_name" = "lix-vm" ]; then
+              echo "  ⊘ skip (helper/VM test)"
+              SKIP=$((SKIP + 1))
+              RESULTS="$RESULTS\n  ⊘ $test_name (helper/VM test)"
+              continue
+            fi
+
+            if nix-instantiate --eval --strict \
+              --arg pkgs '(import (builtins.getFlake (toString ./. )).inputs.nixpkgs) {}' \
+              "$test" 2>&1; then
+              result=$(nix-instantiate --eval --strict \
+                --arg pkgs '(import (builtins.getFlake (toString ./. )).inputs.nixpkgs) {}' \
+                "$test" 2>/dev/null | grep -oE 'passed = true|all_pass = true' || true)
+
+              if [ -n "$result" ]; then
+                echo "  ✓ PASS"
+                PASS=$((PASS + 1))
+                RESULTS="$RESULTS\n  ✓ $test_name"
+              else
+                echo "  ⚠ WARN (evaluated but passed != true)"
+                FAIL=$((FAIL + 1))
+                RESULTS="$RESULTS\n  ⚠ $test_name (passed != true)"
+              fi
+            else
+              echo "  ✗ FAIL"
+              FAIL=$((FAIL + 1))
+              RESULTS="$RESULTS\n  ✗ $test_name (eval error)"
+            fi
+          done
+
+          TOTAL=$((PASS + FAIL + SKIP))
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Test Coverage Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo -e "$RESULTS"
+          echo ""
+          echo "Total: $TOTAL | Pass: $PASS | Fail: $FAIL | Skip: $SKIP"
+          echo "Coverage: $(echo "scale=0; $PASS * 100 / ($PASS + $FAIL)" | bc 2>/dev/null || echo "N/A")%"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::error::$FAIL tests did not pass"
+            exit 1
+          fi
+
+      - name: Run NixOS eval checks (flake structure)
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Flake structure validation..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          nix flake check --no-build
+          echo "✓ Flake structure validation complete"
+
+      - name: Run local CI script
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Running local CI validation..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ ! -d /etc/nixos ]; then
+            echo "::notice::Skipping host-local CI script; /etc/nixos is not present on this runner."
+          elif [ -f scripts/ci/local-ci.sh ]; then
+            bash scripts/ci/local-ci.sh
+          else
+            echo "⊘ local-ci.sh not found, skipping"
+          fi

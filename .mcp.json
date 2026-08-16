@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "/data/agents/mcp-bridges/github-mcp.sh"
+    },
+    "git": {
+      "command": "/data/agents/mcp-bridges/git-mcp.sh"
+    },
+    "fetch": {
+      "command": "mcp-fetch"
+    },
+    "context7": {
+      "command": "mcp-context7"
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/playwright-mcp@latest"]
+    },
+    "nixos-cluster": {
+      "command": "nix",
+      "args": ["run", "/etc/nixos#nixos-cluster-mcp"]
+    },
+    "kubernetes": {
+      "command": "nix",
+      "args": ["run", "/etc/nixos#kubernetes-mcp-server"]
+    },
+    "filesystem": {
+      "command": "mcp-filesystem",
+      "args": ["/etc/nixos", "/home/j_kro"]
+    },
+    "selfhosted-tools": {
+      "command": "/data/agents/mcp-bridges/selfhosted-mcp.sh"
+    },
+      "command": "python3",
+    },
+    "sequential-thinking": {
+      "command": "/data/agents/mcp-bridges/sequential-thinking.sh"
+    },
+    "buffy-mcp": {
+      "command": "nix",
+      "args": ["run", "/etc/nixos#buffy-mcp"]
+    }
+  }
+}

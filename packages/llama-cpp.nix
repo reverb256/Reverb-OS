@@ -1,0 +1,195 @@
+{
+  lib,
+  stdenv,
+  fetchurl,
+  fetchgit,
+  cmake,
+  ninja,
+  pkg-config,
+  # Backend options
+  cudaSupport ? false,
+  cudaPackages ? null,
+  vulkanSupport ? false,
+  rocmSupport ? false,
+  rocmPackages ? null,
+  # Vulkan dependencies
+  vulkan-headers ? null,
+  vulkan-loader ? null,
+  shaderc ? null,
+  glslang ? null,
+  # Build configuration
+  # Pinned to a commit that includes Muse Glimmer + Nemotron 3.5 Lightning
+  # architecture support (PR #26841 "model: Muse Glimmer Support" merged
+  # 2026-08-10; PR #26905 "Dflash support for nemotron-3.5" merged
+  # 2026-08-11) PLUS the 2026-08-14 ggml_ssm_scan recurrent-state-rollback
+  # fix (#26623, rev 1692f9e5) — REQUIRED for Qwen3.8-27B (arch qwen35,
+  # hybrid Gated DeltaNet): older pins crash with "CUDA error: driver
+  # shutting down" / core dump during tensor load. Delta kept small
+  # (33 commits) to avoid regressing Muse Glimmer / Nemotron Lightning,
+  # which are also served from this build.
+  version ? "0-unstable-2026-08-14-ssmscan-fix",
+  # PrismML bonsai-ml fork: Q1_0/Q2_0 AVX512-VNNI CPU repack, CUDA __byte_perm
+  # extraction, DSpark drafter fixes, CPU-MoE flags (--n-cpu-moe). Fleet runs
+  # the fork for bonsai already (560rfa8pm); mainline lacks these. Fork base
+  # is 07-31 mainline: has nemotron_h_moe (Lightning) but NOT muse-glimmer
+  # (NIM-cloud only — fine to lose locally).
+  useFork ? false,
+  # Feature flags
+  native ? false,
+  sharedLibs ? false,
+  buildExamples ? true,
+  buildTests ? false,
+  buildServer ? true,
+  openSSL ? false,
+  cudaArchitectures ? "86;89",
+  extraCmakeFlags ? [],
+  ...
+}: let
+  # Default source: pinned git checkout (tag tarballs lag; we need the
+  # muse-glimmer commit specifically). With useFork, the PrismML bonsai-ml
+  # fork (prism branch) is used instead — it has the Q1_0/Q2_0 repack +
+  # DSpark + CPU-MoE specializations the fleet's bonsai deployments need.
+  defaultSrc =
+    if useFork
+    then
+      fetchgit {
+        url = "https://github.com/PrismML-Eng/llama.cpp";
+        rev = "9ca265a57f85f2117942490f421f64a226dd9847"; # prism branch 2026-07-31
+        hash = "sha256-AATH4Bg0nhbuftEA1xcwAX0geVNmuBY5UWK5u2vgEYI=";
+        leaveDotGit = false;
+      }
+    else
+      fetchgit {
+        url = "https://github.com/ggml-org/llama.cpp";
+        rev = "1692f9e50bb20fd96b963af38a282daf78feea64";
+        hash = "sha256-6Ajy/SdHjimUqdkZB5vv57sy+ytURVd1wblCp7TVXAg=";
+        leaveDotGit = false;
+      };
+  # src defined as let binding above
+
+  # Determine which backend stdenv to use
+  effectiveStdenv =
+    if cudaSupport && cudaPackages != null
+    then cudaPackages.backendStdenv
+    else if rocmSupport && rocmPackages != null
+    then rocmPackages.backendStdenv
+    else stdenv;
+
+  # Helper functions for cmake flags
+  cmakeBool = option: value: "-D${option}=${
+    if value
+    then "ON"
+    else "OFF"
+  }";
+  cmakeFeature = feature: value: "-D${feature}=${value}";
+
+  # Base build inputs
+  baseNativeBuildInputs = [cmake ninja pkg-config];
+  baseBuildInputs = [];
+
+  # CUDA-specific inputs
+  cudaNativeBuildInputs = lib.optionals cudaSupport (with cudaPackages; [
+    cuda_nvcc
+  ]);
+  cudaBuildInputs = lib.optionals cudaSupport (with cudaPackages; [
+    cuda_cudart
+    libcublas
+  ]);
+
+  # Vulkan inputs
+  vulkanBuildInputs = lib.optionals vulkanSupport [
+    vulkan-headers
+    vulkan-loader
+    shaderc
+    glslang
+  ];
+
+  # ROCm inputs
+  rocmBuildInputs = lib.optionals rocmSupport (with rocmPackages; [
+    rocm-core
+    hip-runtime-amd
+  ]);
+
+  # Combine all inputs
+  nativeBuildInputs = baseNativeBuildInputs ++ cudaNativeBuildInputs;
+  buildInputs = baseBuildInputs ++ cudaBuildInputs ++ vulkanBuildInputs ++ rocmBuildInputs;
+
+  # Base cmake flags
+  baseCmakeFlags = [
+    (cmakeBool "GGML_NATIVE" native)
+    (cmakeBool "BUILD_SHARED_LIBS" sharedLibs)
+    (cmakeBool "LLAMA_BUILD_EXAMPLES" buildExamples)
+    (cmakeBool "LLAMA_BUILD_TESTS" buildTests)
+    (cmakeBool "LLAMA_BUILD_SERVER" buildServer)
+    (cmakeBool "LLAMA_OPENSSL" openSSL)
+    (cmakeFeature "CMAKE_BUILD_TYPE" "Release")
+  ];
+
+  # Backend-specific cmake flags
+  cudaCmakeFlags = lib.optionals cudaSupport [
+    (cmakeBool "GGML_CUDA" true)
+    (cmakeBool "GGML_CUDA_F16" true)
+    (cmakeFeature "CMAKE_CUDA_ARCHITECTURES" cudaArchitectures)
+    (cmakeBool "CMAKE_BUILD_RPATH_USE_ORIGIN" true)
+    (cmakeBool "CMAKE_INSTALL_RPATH_USE_LINK_PATH" false)
+  ];
+
+  vulkanCmakeFlags = lib.optionals vulkanSupport [
+    (cmakeBool "GGML_VULKAN" true)
+  ];
+
+  rocmCmakeFlags = lib.optionals rocmSupport [
+    (cmakeBool "GGML_HIPBLAS" true)
+    (cmakeBool "GGML_CUDA" false) # Ensure CUDA is disabled for ROCm
+  ];
+
+  # Combine all cmake flags
+  cmakeFlags = baseCmakeFlags ++ cudaCmakeFlags ++ vulkanCmakeFlags ++ rocmCmakeFlags ++ extraCmakeFlags;
+in
+  effectiveStdenv.mkDerivation {
+    pname = "llama-cpp";
+    inherit version;
+    src = defaultSrc;
+
+    inherit nativeBuildInputs buildInputs cmakeFlags;
+
+    postInstall = ''
+      # Install binaries (use || true for optional ones that may not exist in all versions)
+      install -Dm755 bin/llama-server $out/bin/llama-server
+      install -Dm755 bin/llama-cli $out/bin/llama-cli
+      install -Dm755 bin/llama-perplexity $out/bin/llama-perplexity  || true
+      install -Dm755 bin/llama-quantize $out/bin/llama-quantize      || true
+      install -Dm755 bin/llama-evaluate $out/bin/llama-evaluate      || true
+
+      # Create convenience symlinks
+      ln -sf llama-cli $out/bin/llama
+
+      # Install any additional llama-* binaries that exist
+      for bin in bin/llama-*; do
+        if [ -f "$bin" ]; then
+          install -Dm755 "$bin" "$out/bin/$(basename $bin)" || true
+        fi
+      done
+    '';
+
+    postFixup = lib.optionalString stdenv.isLinux ''
+      # Shrink RPATH for smaller binaries
+      find $out/bin -type f -executable -exec patchelf --shrink-rpath {} \; || true
+    '';
+
+    meta = {
+      description =
+        "Inference of Meta's LLaMA model (and others) in pure C/C++"
+        + lib.optionalString useFork " (PrismML bonsai-ml fork: Q1_0/Q2_0 repack, DSpark, CPU-MoE)"
+        + lib.optionalString cudaSupport " with CUDA support"
+        + lib.optionalString vulkanSupport " with Vulkan support"
+        + lib.optionalString rocmSupport " with ROCm support";
+      homepage =
+        if useFork
+        then "https://github.com/PrismML-Eng/llama.cpp"
+        else "https://github.com/ggml-org/llama.cpp";
+      license = lib.licenses.mit;
+      platforms = lib.platforms.linux;
+      mainProgram = "llama-cli";
+    };
+  }

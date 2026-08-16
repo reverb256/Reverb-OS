@@ -1,0 +1,62 @@
+---
+# Fast pre-commit hooks - should complete in < 5 seconds
+# Heavy checks (flake check, builds) run in CI, not here
+repos:
+  # Secret scanning (2026-08-16, public-flip audit) — runs BEFORE the local
+  # hooks so a leaked secret aborts the commit immediately.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # Nix linting (fast - ~2 seconds)
+      - id: nix-lint-statix
+        name: Nix lint (statix)
+        entry: statix check
+        language: system
+        files: \.nix$
+
+      # Dead code detection (fast - ~1 second)
+      - id: nix-lint-deadnix
+        name: Nix lint (deadnix)
+        entry: deadnix -f
+        language: system
+        files: \.nix$
+      # Syntax validation (fast - ~1 second per file)
+      - id: nix-parse-check
+        name: Nix syntax check
+        entry: nix-instantiate --parse
+        language: system
+        files: \.nix$
+        pass_filenames: true
+
+
+      # Text formatting (very fast - ~0.1 seconds)
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        entry: trailing-whitespace-fixer
+        language: system
+        types: [text]
+
+      - id: end-of-file-fixer
+        name: Fix end of files
+        entry: end-of-file-fixer
+        language: system
+        types: [text]
+
+      # Prevent large files (very fast)
+      - id: check-added-large-files
+        name: Check for large files
+        entry: check-added-large-files
+        language: system
+        args: [--maxkb=1000]
+
+      # Dual-fork secretspec stack validation (per-file on changed files)
+      - id: secretspec-stack-validation
+        name: Secretspec stack validation (Nix parse + TOML + bash syntax + binary presence)
+        entry: /etc/nixos/scripts/validate-secretspec-stack.sh
+        language: system
+        pass_filenames: true
+        files: ^(pkgs/secretspec.*/.*\.nix|.*secretspec.*\.toml|.*secretspec-.*\.yml|.*secretspec-.*\.yaml|secretspec-fork-patches/.*|scripts/secretspec-fork-.*|scripts/validate-secretspec-stack\.sh)$

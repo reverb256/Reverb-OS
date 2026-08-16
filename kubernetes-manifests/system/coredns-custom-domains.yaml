@@ -1,0 +1,26 @@
+# CoreDNS custom stub domains for cluster DNS resolution
+# Mounted at /etc/coredns/custom/ by K3s CoreDNS (coredns-custom ConfigMap)
+# Both .lan and .ts.net forward to unbound on all cluster nodes (sequential fallback)
+# Unbound handles .lan via local-data and .ts.net via forward-zone to 100.100.100.100
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  stub-lan.server: |
+    lan:53 {
+        errors
+        cache 30
+        forward . 10.1.1.120:53 10.1.1.110:53 10.1.1.130:53 10.1.1.140:53 {
+            policy sequential
+        }
+    }
+  stub-tsnet.server: |
+    ts.net:53 {
+        errors
+        cache 30
+        forward . 10.1.1.110:53 10.1.1.120:53 10.1.1.130:53 10.1.1.140:53 {
+            policy sequential
+        }
+    }

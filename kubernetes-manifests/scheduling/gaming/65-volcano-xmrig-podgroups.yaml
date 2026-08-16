@@ -1,0 +1,43 @@
+# These allow Volcano to manage and preempt CPU mining pods
+---
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: PodGroup
+metadata:
+  namespace: mining
+  labels:
+    host: zephyr
+spec:
+  minMember: 1
+  minResources:
+    cpu: "4"
+    memory: "1Gi"
+  priorityClassName: mining-low
+  queue: mining-queue
+---
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: PodGroup
+metadata:
+  namespace: mining
+  labels:
+    host: nexus
+spec:
+  minMember: 1
+  minResources:
+    cpu: "3"
+    memory: "1Gi"
+  priorityClassName: mining-low
+  queue: mining-queue
+---
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: PodGroup
+metadata:
+  namespace: mining
+  labels:
+    host: sentry
+spec:
+  minMember: 1
+  minResources:
+    cpu: "1"
+    memory: "512Mi"
+  priorityClassName: mining-low
+  queue: mining-queue

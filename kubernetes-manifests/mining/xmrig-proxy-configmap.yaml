@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: mining
+  labels:
+    component: stratum-proxy
+data:
+  config.json: |
+    {
+      "bind": [
+        {"host": "0.0.0.0", "port": 3333}
+      ],
+      "api": {
+        "port": 8081,
+        "restricted": true,
+      },
+      "randomx": {
+        "mode": "light"
+      },
+      "log": {
+        "level": 5
+      },
+      "pools": [
+        {
+          "id": "kryptex-rx-us",
+          "url": "xtm-rx-us.kryptex.network:8038",
+          "user": "krxXVNVMM7.cpu-proxy",
+          "tls": true,
+          "keepalive": true,
+          "priority": 1
+        },
+        {
+          "id": "kryptex-rx-eu",
+          "url": "xtm-rx-eu.kryptex.network:8038",
+          "user": "krxXVNVMM7.cpu-proxy",
+          "tls": true,
+          "keepalive": true,
+          "priority": 2
+        },
+        {
+          "id": "kryptex-cr29-us",
+          "url": "xtm-c29-us.kryptex.network:8040",
+          "user": "krxXVNVMM7.gpu-proxy",
+          "tls": true,
+          "keepalive": true,
+          "priority": 1
+        },
+        {
+          "id": "kryptex-cr29-eu",
+          "url": "xtm-c29-eu.kryptex.network:8040",
+          "user": "krxXVNVMM7.gpu-proxy",
+          "tls": true,
+          "keepalive": true,
+          "priority": 2
+        }
+      ],
+      "workers": [
+      ]
+    }

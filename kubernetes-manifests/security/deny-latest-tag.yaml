@@ -1,0 +1,81 @@
+# ValidatingAdmissionPolicy: Block :latest tags in Kubernetes
+# Supply chain security: prevents deploying mutable image references
+# NOTE: CEL expressions use !has(...) || guard to handle missing initContainers
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: deny-latest-tag
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: supply-chain-security
+    app.kubernetes.io/component: admission-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["pods"]
+  validations:
+  - expression: "!has(object.spec.initContainers) || object.spec.initContainers.all(c, !c.image.endsWith(':latest'))"
+    message: "Supply chain security: Using :latest tag in initContainers is forbidden."
+  - expression: "object.spec.containers.all(c, !c.image.endsWith(':latest'))"
+    message: "Supply chain security: Using :latest tag is forbidden. Pin to a specific version."
+---
+# Separate policy for Deployments (needs different path to initContainers)
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: deny-latest-tag-deployments
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: supply-chain-security
+    app.kubernetes.io/component: admission-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["apps"]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["deployments"]
+  validations:
+  - expression: "!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.all(c, !c.image.endsWith(':latest'))"
+    message: "Supply chain security: Using :latest tag in initContainers is forbidden in deployments."
+  - expression: "object.spec.template.spec.containers.all(c, !c.image.endsWith(':latest'))"
+    message: "Supply chain security: Using :latest tag is forbidden in deployments."
+---
+# Binding for Pods
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: deny-latest-tag-binding
+  labels:
+    app.kubernetes.io/name: supply-chain-security
+spec:
+  policyName: deny-latest-tag
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values: [kube-system, tigera-operator, calico-system, search]
+---
+# Binding for Deployments
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: deny-latest-tag-deployments-binding
+  labels:
+    app.kubernetes.io/name: supply-chain-security
+spec:
+  policyName: deny-latest-tag-deployments
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values: [kube-system, tigera-operator, calico-system, search]

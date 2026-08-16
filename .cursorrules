@@ -1,0 +1,32 @@
+# Cursor rules for NixOS Cluster
+
+**Primary reference:** [`AGENTS.md`](AGENTS.md) — universal rules, style, and
+safety constraints. This file only adds Cursor-specific shortcuts; it must not
+duplicate or contradict AGENTS.md.
+
+## Non-negotiable
+
+- Declarative only. Edit `.nix` files and deploy with `just deploy`; never
+  `systemctl enable/start` a persistent service, `nix-env -i`, or edit `/etc`
+  directly.
+- Use `lib.mkOptionDefault` for lists and mergeable attrs in shared modules.
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `just check` | quick flake validation (no build) |
+| `just build` | build the local host toplevel |
+| `just switch` | apply to the local host |
+| `just test-apply` | build + test activation without a permanent switch |
+| `just deploy [<host>]` | build + deploy to all or one host |
+| `just rollback` | roll back the local host |
+| `just full-check` | full pre-commit validation (`scripts/check.sh`) |
+
+## Working on changes
+
+- Work in an issue worktree: `just new-worktree NNN`.
+- Validate with `just check` before committing; `git add` new files (Nix only
+  sees git-tracked files).
+- Follow the task guides in [`agents/skills/`](agents/skills/) for deploy,
+  add-service, K8s workloads, and secrets.

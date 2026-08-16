@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: mining
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+  template:
+    metadata:
+      labels:
+    spec:
+      nodeName: nexus
+      hostNetwork: true
+      automountServiceAccountToken: false
+      serviceAccountName: gpu-miner-sa
+      priorityClassName: mining-low
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      terminationGracePeriodSeconds: 30
+      containers:
+        image: gcr.io/distroless/static-debian12@sha256:20bc6c0bc4d625a22a8fde3e55f6515709b32055ef8fb9cfbddaa06d1760f838
+        args:
+        - "-b"
+        - "0.0.0.0:3333"
+        - "-r"
+        - "krxXVNVMM7"
+        ports:
+        - containerPort: 3333
+          protocol: TCP
+        - containerPort: 8081
+          protocol: TCP
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: nix
+          mountPath: /nix
+          subPath: nix
+      volumes:
+      - name: nix
+        csi:
+          driver: nixkube
+          volumeAttributes:

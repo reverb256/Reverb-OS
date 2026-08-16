@@ -1,0 +1,127 @@
+# NVIDIA Common Configuration Module
+# Base NVIDIA driver configuration for all NVIDIA GPUs
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.hardware.nvidia-common;
+in {
+  options.hardware.nvidia-common.enable = lib.mkEnableOption "NVIDIA GPU support";
+
+  config = lib.mkIf cfg.enable {
+    # Enable graphics for the Steam/Proton host path. 32-bit support is
+    # required by many native games and Proton/Wine dependencies; host-specific
+    # exceptions must be explicit rather than a global force-disable.
+    hardware.graphics = {
+      enable = true;
+      enable32Bit = lib.mkDefault true;
+
+      extraPackages = with pkgs; [
+        vulkan-loader
+        vulkan-tools
+      ];
+    };
+
+    # Load nvidia driver for Xorg and Wayland
+    services.xserver.videoDrivers = ["nvidia"];
+
+    hardware.nvidia = {
+      # Modesetting is required for Wayland
+      modesetting.enable = true;
+
+      # Power management (optional, can cause suspend issues)
+      powerManagement.enable = false;
+
+      # new_feature (610.x): latest fixes (Vulkan HDR WSI, DRM color-pipeline
+      # groundwork) — kept for the HDR/LSFG projects on zephyr. Ampere fully
+      # supported.
+      # DE-RISK ROLLBACK: if Xid-109 stutters or compositor glitches appear,
+      # switch to nvidiaPackages.stable (595.84 in the same nixpkgs) — the
+      # community-consensus pick for daily-driver Ampere gaming on Wayland.
+      package = config.boot.kernelPackages.nvidiaPackages.new_feature;
+
+      # Open source kernel module (required for Turing+/RTX 30 series)
+      # Better Wayland/Plasma 6 stability, no kernel taint, better error handling
+      # GSP firmware still runs on GPU (required for Ampere/RTX 30 series)
+      open = true;
+
+      # Enable nvidia-settings
+      nvidiaSettings = true;
+    };
+
+    # Expose the NVIDIA Vulkan ICD to the loader's default XDG search path.
+    # The nixpkgs nvidia module links the driver into /run/opengl-driver (tmpfiles),
+    # but the Vulkan loader only searches its own prefix (/run/current-system/sw)
+    # and XDG dirs, so without this link Vulkan apps (Handy STT, Vulkan llama.cpp)
+    # silently fall back to CPU. /etc/xdg is first in XDG_CONFIG_DIRS.
+    environment.etc."xdg/vulkan/icd.d/nvidia_icd.json".source =
+      "${config.hardware.nvidia.package}/share/vulkan/icd.d/nvidia_icd.json";
+
+    # NVIDIA kernel module options via modprobe
+    boot.extraModprobeConfig = ''
+      # Enable GSP firmware (required for Ampere/RTX 30 series)
+      # GSP runs control firmware on the GPU for better performance
+      options nvidia NVreg_EnableGpuFirmware=1
+
+      # Disable DynamicPowerManagement to prevent HDMI brightness fluctuations
+      # DPM=0 prevents GPU from auto-scaling power based on input activity
+      options nvidia NVreg_DynamicPowerManagement=0
+    '';
+
+    # ============================================================================
+    # NVIDIA CONTAINER TOOLKIT (CDI for Kubernetes GPU passthrough)
+    # ============================================================================
+    # Enables CDI (Container Device Interface) specification generation for NixOS
+    # This is required for Kubernetes GPU passthrough to work with /nix/store paths
+    hardware.nvidia-container-toolkit = {
+      enable = true;
+      mount-nvidia-executables = true;
+    };
+
+    # Make nvidia-cdi-generator non-fatal during activation.
+    # When the kernel changes, the new userspace libs don't match the running
+    # kernel driver, causing the generator to fail. This blocks activation.
+    # The generator will work correctly after reboot when kernel and driver match.
+    systemd.services.nvidia-container-toolkit-cdi-generator = {
+      unitConfig.OnFailure = "";
+      serviceConfig.Type = "oneshot";
+      serviceConfig.RemainAfterExit = true;
+      serviceConfig.SuccessExitStatus = "0 1";
+    };
+
+    # ============================================================================
+    # GPU OPTIMIZATIONS FOR AI INFERENCE
+    # ============================================================================
+    # Enable persistence mode and disable auto-boost for consistent performance
+    # These optimizations reduce inference latency by 1-3 seconds per request
+    # and eliminate performance jitter during sustained workloads.
+
+    # Enable persistence mode for all GPUs
+    # Prevents GPU driver from unloading during idle periods
+    # Reduces initialization latency for AI inference requests
+    systemd.services.nvidia-persistence-mode = {
+      description = "Enable NVIDIA GPU persistence mode for AI workloads";
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "/run/current-system/sw/bin/nvidia-smi -pm 1";
+      };
+    };
+
+    # ============================================================================
+    # GPU POWER/PERFORMANCE MODE
+    # ============================================================================
+    # DynamicPowerManagement disabled via NVreg_DynamicPowerManagement=0
+    # in boot.extraModprobeConfig above.
+    #
+    # This prevents GPU from auto-scaling power based on input activity,
+    # which fixes HDMI TV brightness fluctuations when typing/moving mouse.
+
+    # NOTE: NixOS nvidia-container-toolkit module handles CDI generation.
+    # The default ExecStart (nvidia-cdi-generator) works correctly.
+    # Do NOT add a custom ExecStart override — it appends instead of replacing,
+    # causing the service to run twice and fail on the second ExecStart.
+  };
+}

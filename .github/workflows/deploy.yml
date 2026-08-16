@@ -1,0 +1,272 @@
+---
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target host(s)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - zephyr
+          - nexus
+          - forge
+          - sentry
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homelab-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    name: Deploy to Cluster
+    runs-on: ${{ fromJSON('["self-hosted", "nixos", "nexus", "builder"]') }}
+    environment: homelab-production
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        # pin:actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Preflight gate (checkout provenance + builder drift)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Preflight: the checkout below ($GITHUB_WORKSPACE) is what ships."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          # Fail closed unless the checked-out ref matches origin/main and no
+          # in-flight nexus build is active. This replaces the cosmetic
+          # `github.ref == main` guard with an actual provenance check, and
+          # self-heals nexus /etc/nixos to canonical if it drifted.
+          FLAKE="$GITHUB_WORKSPACE" ./scripts/preflight-check.sh
+
+      - name: Pre-build validation
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Pre-build: verifying configs build before deploying..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          TARGET="${{ github.event.inputs.target }}"
+          if [ "$TARGET" = "all" ]; then
+            HOSTS="zephyr nexus forge sentry"
+          else
+            HOSTS="$TARGET"
+          fi
+
+          for host in $HOSTS; do
+            echo "Building $host..."
+            if ! nixos-rebuild build --flake .#$host 2>&1 | tee /tmp/prebuild-$host.log; then
+              echo ""
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              echo "ERROR: Build failed for $host -- aborting deploy"
+              echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              cat /tmp/prebuild-$host.log
+              exit 1
+            fi
+            echo "✓ $host builds successfully"
+          done
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "All targets build successfully. Proceeding with deploy..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Guard Layer-2 lock sync
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          # The home-manager-config flake input is the Layer-2 source of truth.
+          # If flake.lock pins a rev behind the input's default branch (master),
+          # the deploy silently ships the stale Layer-2 config. Catch that here
+          # before any node is touched.
+          LOCK_REV=$(python3 - <<'PY'
+          import json
+          d = json.load(open('flake.lock'))
+          n = d['nodes']
+          for k, v in n.items():
+              if 'home-manager-config' in k:
+                  print(v['locked']['rev'])
+                  break
+          PY
+          )
+          REMOTE_REV=$(git ls-remote https://github.com/reverb256/home-manager-config.git refs/heads/master | awk '{print $1}')
+          echo "flake.lock pins home-manager-config at: $LOCK_REV"
+          echo "home-manager-config master is at:         $REMOTE_REV"
+          if [ -z "$REMOTE_REV" ]; then
+            echo "::warning::Could not reach home-manager-config remote; skipping lock-sync guard (network-limited)."
+            exit 0
+          fi
+          if [ "$LOCK_REV" != "$REMOTE_REV" ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "ABORT: home-manager-config lock is behind master."
+            echo "Run 'nix flake update home-manager-config' (or wait for the"
+            echo "scheduled flake-update.yml PR) and re-run the deploy."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          fi
+          echo "✓ home-manager-config lock is in sync with master"
+
+      - name: Pause mining
+        run: |
+          sudo systemctl stop mining.target
+
+      - name: Deploy to hosts
+        run: |
+          cd "$GITHUB_WORKSPACE"
+
+          # Signal GPU scheduler
+          signal_gpu_scheduler() {
+            local state=$1
+            local host=$2
+            if [ "$host" = "zephyr" ] || [ "$host" = "nexus" ] || [ "$host" = "forge" ] || [ "$host" = "sentry" ]; then
+              if [ "$host" = "zephyr" ]; then
+                echo "$state" | sudo tee /run/gpu-scheduler/ai-state > /dev/null
+              else
+                ssh $host "echo '$state' | sudo tee /run/gpu-scheduler/ai-state > /dev/null"
+              fi
+            fi
+          }
+
+          GPU_HOSTS="zephyr nexus forge sentry"
+
+          TARGET="${{ github.event.inputs.target }}"
+          if [ "$TARGET" = "all" ]; then
+            COLMENA_TARGET=""
+          else
+            COLMENA_TARGET="--on $TARGET"
+          fi
+
+          # Signal deployment start for GPU nodes
+          for host in $GPU_HOSTS; do
+            signal_gpu_scheduler "AI_START" "$host"
+          done
+
+          # Deploy using Colmena
+          if ! nix run .#apps.x86_64-linux.colmena -- apply $COLMENA_TARGET 2>&1 | tee /tmp/deploy-colmena.log; then
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "ERROR: Colmena deployment failed, attempting rollback..."
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            if [ -z "$COLMENA_TARGET" ]; then
+              nix run .#apps.x86_64-linux.colmena -- rollback --all 2>&1 | tee -a /tmp/deploy-colmena.log
+            else
+              nix run .#apps.x86_64-linux.colmena -- rollback --on "$TARGET" 2>&1 | tee -a /tmp/deploy-colmena.log
+            fi
+
+            for host in $GPU_HOSTS; do
+              signal_gpu_scheduler "" "$host"
+            done
+
+            cat /tmp/deploy-colmena.log
+            exit 1
+          fi
+
+          # Signal deployment complete for GPU nodes
+          for host in $GPU_HOSTS; do
+            signal_gpu_scheduler "" "$host"
+          done
+
+          echo "✓ Successfully deployed using Colmena"
+
+      - name: Sync central repo
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Syncing central bare repo on nexus..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          git remote get-url central >/dev/null 2>&1 || git remote add central j_kro@10.1.1.120:/srv/git/nixos-config.git
+          if git push central main 2>&1; then
+            echo "✓ Central repo synced"
+          else
+            echo "⚠ Central repo sync failed (cluster nodes may have stale refs)"
+          fi
+
+      - name: Sync cluster nodes
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Pulling latest config on all cluster nodes..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          ALL_HOSTS="nexus forge sentry"
+          for host in $ALL_HOSTS; do
+            echo "Pulling on $host..."
+            if ssh "$host" "cd /etc/nixos && git stash 2>/dev/null; git pull --ff-only central main 2>&1"; then
+              echo "✓ $host synced"
+            else
+              echo "⚠ $host pull failed (manual sync may be needed)"
+            fi
+          done
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "All nodes synced"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Resume mining
+        if: always()
+        run: |
+          sudo systemctl start mining.target
+          if ! sudo systemctl is-active mining.target >/dev/null 2>&1; then
+            echo "WARNING: mining.target failed to start"
+            sudo systemctl status mining.target || true
+            exit 1
+          fi
+          echo "✓ Mining services restarted successfully"
+
+      - name: Health check
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Running health checks..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          TARGET="${{ github.event.inputs.target }}"
+          if [ "$TARGET" = "all" ]; then
+            HOSTS="zephyr nexus forge sentry"
+          else
+            HOSTS="$TARGET"
+          fi
+
+          for host in $HOSTS; do
+            echo "Checking $host..."
+            case "$host" in
+              zephyr)
+                if ssh zephyr "uptime" 2>/dev/null; then
+                  echo "✓ zephyr: SSH reachable"
+                else
+                  echo "⚠ zephyr: SSH unreachable"
+                fi
+                ;;
+              nexus)
+                if ssh localhost "uptime" 2>/dev/null; then
+                  echo "✓ nexus: SSH reachable (runner host)"
+                else
+                  echo "⚠ nexus: SSH unreachable"
+                fi
+                ;;
+              forge|sentry)
+                if ssh "$host" "uptime" 2>/dev/null; then
+                  echo "✓ $host: SSH reachable"
+                else
+                  echo "⚠ $host: SSH unreachable"
+                fi
+                ;;
+            esac
+          done
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Health checks complete"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "DEPLOYMENT FAILED"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Check the workflow logs for details"

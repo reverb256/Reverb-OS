@@ -1,0 +1,34 @@
+---
+# Fix CoreDNS network policy to allow API server access.
+# Allows CoreDNS pods to reach the Kubernetes API server for health/metrics.
+#
+# API server ClusterIP is 10.43.0.1 (service CIDR 10.43.0.0/16).
+# (Previously pointed at 10.0.0.0/24 — wrong for this cluster.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-coredns-api-server
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels:
+      k8s-app: kube-dns
+  policyTypes:
+  - Egress
+  egress:
+  # Allow HTTPS to Kubernetes API server (10.43.0.1:443)
+  - to:
+    - ipBlock:
+        cidr: 10.43.0.0/24
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow DNS to external servers (existing rule)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

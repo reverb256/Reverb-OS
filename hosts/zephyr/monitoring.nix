@@ -1,0 +1,47 @@
+# Zephyr Monitoring Configuration
+# Control plane node - minimal monitoring footprint
+{lib, ...}: {
+  imports = [
+    ../../modules/services/monitoring/default.nix
+  ];
+
+  # SERVICES CONFIGURATION
+  services = {
+    # Fleet RGB inventory and explicitly allowlisted Stylix synchronization.
+    rgb-inventory = {
+      enable = true;
+      stylixSync.enable = true;
+    };
+    # System monitoring CLI tools
+    monitoring.system-tools = {
+      enable = true;
+      packageSet = "standard";
+    };
+
+    # Node exporter for Prometheus scraping (from Sentry)
+    monitoring.node-exporter = {
+      enable = true;
+      listenAddress = "0.0.0.0"; # Allow cluster scraping
+    };
+
+    # Log aggregation to Sentry's Loki
+    gputemps-exporter.enable = true;
+
+    # dbus-broker fd usage canary (session-bus EMFILE took down the desktop 2026-08-14)
+    dbus-broker-exporter.enable = true;
+
+    monitoring.smart-exporter.enable = true;
+
+    monitoring.promtail = {
+      enable = false;
+      lokiUrl = "http://10.1.1.140:3100/loki/api/v1/push";
+    };
+    # Log shipping to Loki (Grafana Alloy)
+    # NVIDIA DCGM error tracking (ECC, PCIe replay count)
+    monitoring.dcgm-exporter.enable = true;
+    monitoring.grafana-alloy.enable = true;
+  };
+
+  # Ensure node-exporter port is open for Prometheus scraping
+  networking.firewall.allowedTCPPorts = lib.mkOptionDefault [9100];
+}

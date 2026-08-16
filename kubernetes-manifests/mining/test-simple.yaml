@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-simple
+  namespace: mining
+spec:
+  nodeName: forge
+  containers:
+  - name: test
+    imagePullPolicy: Never
+    command: ["/bin/sh"]
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "100Mi"
+  restartPolicy: Never

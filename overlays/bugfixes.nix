@@ -1,0 +1,146 @@
+{
+  inputs,
+  _final,
+  prev,
+}: {
+  # 2026-08-04: gjs/gtk4/libsecret/qtbase dontCheck overrides REMOVED.
+  # Cache-evidence audit: the VANILLA (checks-ON) derivations for all four
+  # substitute from cache.nixos.org (narinfo HTTP 200):
+  #   gjs 3qvw2ws…, gtk4 qq86wi0…, libsecret xplgg6b…, qt5.qtbase wmza0wv…
+  # Hydra builds these WITH tests enabled and passing — the dontCheck flags
+  # only re-forked the derivations off-cache, forcing the gtk4→chromium
+  # family to recompile (same disease as the cups overlay fork, fixed 2026-08-04).
+  # Removal restores those packages to cache substitution.
+
+  # webkitgtk: KEPT — vanilla webkitgtk is genuinely NOT in cache.nixos.org
+  # (404), so this is a real from-source build either way; dontCheck avoids
+  # the pinned cluster sandbox's flaky test suite on the nexus builder.
+  webkitgtk = prev.webkitgtk.overrideAttrs (old: {
+    doCheck = false;
+    dontCheck = true;
+  });
+
+  # 2026-08-08: protontricks-1.14.1 test suite asserts real filesystem paths
+  # (steam library discovery) that the Nix sandbox rewrites to
+  # `/nix/var/nix/b/<hash>` — 2 tests fail on the nexus builder unless checks
+  # are disabled (same disease as webkitgtk above). protontricks is pulled
+  # into every workstation/gaming role host via profiles.node.nexus-gaming +
+  # profiles.role.workstation (services.gaming.enable=true), so this blocks
+  # nexus toplevel builds. The tests are upstream codec/path tests, not used
+  # by the installed binary.
+  # doCheck/dontCheck alone do NOT stop pytestCheckHook — it re-defines
+  # checkPhase, so the sandbox-path tests still run. The kill-switch is
+  # dontUsePytestCheck (documented pytestCheckHook option).
+  # overridePythonAttrs does NOT preserve the generic `.override` that the
+  # nixpkgs Steam module calls (programs/steam.nix:231 override extraCompatPaths),
+  # so injecting the compat paths would fail with "attribute 'override' missing".
+  # overrideAttrs preserves `.override` AND accepts the pytestCheckHook kill-switch.
+  protontricks = prev.protontricks.overrideAttrs (old: {
+    dontUsePytestCheck = true;
+    dontCheck = true;
+  });
+
+  # 2026-08-07: nixpkgs removed `libdisplay-info_0_2` (aliases.nix throw,
+  # added 2026-08-04) — but the niri-flake input (sodiboo/niri-flake) still
+  # `pkgs.callPackage make-niri` with an explicit `libdisplay-info_0_2` arg
+  # and asserts `.version == "0.2.0"` (flake.nix:103). The flake bump pulled
+  # the removal, so every host eval died with the aliases throw. Re-provide a
+  # real 0.2.0 build via nixpkgs' own generic.nix — byte-identical to the
+  # recipe used when 0.2.0 was still packaged (meson + hwdata; verified
+  # against nixpkgs 0954f7ee). Our configs only EVAL it (programs.niri.package
+  # is overridden to pkgs.niri-hdr), but the option value is forced during
+  # module evaluation, so the attr must resolve.
+  libdisplay-info_0_2 = _final.callPackage (import (_final.path + "/pkgs/by-name/li/libdisplay-info/generic.nix") {
+    version = "0.2.0";
+    hash = "sha256-6xmWBrPHghjok43eIDGeshpUEQTuwWLXNHg7CnBUt3Q=";
+  }) {};
+
+  # 2026-08-07: caddy caddytest/integration suite fails in the nix sandbox
+  # (reverse_proxy health-checker test probes a %2F-encoded unix socket URL —
+  # "invalid URL escape"; the suite also needs live ports). Vanilla caddy IS
+  # in cache.nixos.org, but this cluster's nixpkgs rev pulls caddy 2.11.4
+  # whose check phase re-runs the flaky integration suite on every fresh
+  # (non-cached) build — e.g. sentry's zephyr-toplevel build. caddy-with-modules
+  # already sets doCheck = false; align the base package.
+  caddy = prev.caddy.overrideAttrs (old: {
+    doCheck = false;
+  });
+
+  # 2026-08-10: xwayland 24.1.13 fails to build under GCC 15.3 — libunwind's
+  # unw_word_t is now unsigned int* (was unsigned long*) on x86_64, so the
+  # uint64_t val / %PRIx64 in os/backtrace.c is an ABI mismatch. This breaks
+  # gamescope's SDL backend (VK_KHR_x11 unavailable without Xwayland) and thus
+  # the gamescope-wsi HDR path for Steam games on zephyr.
+  #
+  # Upstream Xorg patch (commit e0588d21, MR !1763): use unw_word_t + PRIxPTR,
+  # which is correct for both 32/64-bit. Apply via postPatch so we stay on
+  # nixos-unstable without a full nixpkgs re-pin. The patch is byte-identical
+  # to the fdo merge request.
+  xwayland = prev.xwayland.overrideAttrs (old: {
+    postPatch =
+      (old.postPatch or "")
+      + ''
+        substituteInPlace os/backtrace.c \
+          --replace 'uint64_t val;' 'unw_word_t val;' \
+          --replace 'ErrorF("  %s: 0x%" PRIx64 "\\n", regs[i].name, val);' \
+                  'ErrorF("  %s: 0x%" PRIxPTR "\\n", regs[i].name, val);'
+        # PRIxPTR requires <inttypes.h> which libxserver-os already pulls in
+      '';
+  });
+
+  # 2026-08-15: gamescope HDR support flag wiring (gamescope#2008 pattern).
+  # Root cause (proven via WAYLAND_DEBUG): niri-hdr's wp_color_manager_v1
+  # output image description reports primaries_named(1)=SRGB,
+  # tf_named(9)=SRGB even though the DRW wire is genuinely HDR (10-bit
+  # XB30/AB30, hdr=true). gamescope 3.16.25's SupportsColorManagement()
+  # returns false -> bExposeHDRSupport=false -> SRGB swapchain, grayed
+  # in-game HDR toggle, generic monitor names.
+  #
+  # 2026-08-16: upgraded gamescope to MASTER HEAD (df25cc1d) — past the
+  # 3.16.25 tag, with the swapchain use-after-free fix (1c0e42c) and
+  # Xwayland/nested fixes since Aug-13. The --hdr-debug-force-support flag
+  # is STILL not wired into WaylandBackend::SupportsColorManagement() on
+  # master (verified 2026-08-16: impl lacks `|| g_bForceHDRSupportDebug`),
+  # so our one-line patch is re-applied. Scopebuddy passes
+  # --hdr-debug-force-support; forcing the support flag yields CORRECT HDR
+  # output on niri-hdr's genuinely-HDR wire.
+  #
+  # The patch append is IDEMPOTENT because overlays/default.nix is applied
+  # twice to the module pkgs (tunedNixpkgs in colmena.nix AND
+  # nixpkgs.overlays in common-modules-list.nix). A plain
+  # `++ [./patch]` would list it twice and fail with "Reversed (or
+  # previously applied) patch detected".
+  gamescope = prev.gamescope.overrideAttrs (old: let
+    hasHdrPatch = builtins.any
+      (p: prev.lib.hasSuffix "gamescope-force-hdr-support.patch" (toString p))
+      (old.patches or []);
+  in {
+    src = prev.fetchFromGitHub {
+      owner = "ValveSoftware";
+      repo = "gamescope";
+      rev = "df25cc1db980a1f545675763607faa0749bd6cac";
+      hash = "sha256-bvFYpYkmx4/oTTD0GIiFNKLBehYSbdRu7Sw/LDTRp4s=";
+      # openvr (and other deps) are git submodules; meson's cmake subproject
+      # resolver needs them present or it errors "Unknown git submodule output"
+      fetchSubmodules = true;
+    };
+    patches = (old.patches or [])
+      ++ prev.lib.optional (!hasHdrPatch) ./gamescope-force-hdr-support.patch;
+  
+    # x86-64-v3: gamescope is C++ (Vulkan composition, FSR upscaling,
+    # latch/timing hot paths) — v3 gives AVX2/BMI2 on those loops.
+    NIX_CFLAGS = "-O3 -march=x86-64-v3 -DNDEBUG";
+    NIX_CXXFLAGS = "-march=x86-64-v3";
+  });
+  # gamescope-wsi: keep the FROG implicit layer on the same master rev as
+  # gamescope so the WSI/HDR handshake stays in lockstep.
+  gamescope-wsi = prev.gamescope-wsi.overrideAttrs (old: {
+    src = prev.fetchFromGitHub {
+      owner = "ValveSoftware";
+      repo = "gamescope";
+      rev = "df25cc1db980a1f545675763607faa0749bd6cac";
+      hash = "sha256-bvFYpYkmx4/oTTD0GIiFNKLBehYSbdRu7Sw/LDTRp4s=";
+      fetchSubmodules = true;
+    };
+  });
+}

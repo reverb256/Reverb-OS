@@ -1,0 +1,21 @@
+# Monitoring Infrastructure Modules
+# Prometheus, Grafana, and exporters for cluster observability
+{...}: {
+  imports = [
+    ./prometheus.nix
+    ./alert-rules.nix # Cluster alert rules (HostDown, GPU ECC, service, temperature)
+    ./alertmanager.nix
+    ./alert-webhook.nix # Local webhook receiver (no auth required)
+    ./grafana-v2.nix # New modular dashboard system
+    ./node-exporter.nix
+    ../rgb-inventory.nix
+    ./redis-exporter.nix
+    ./smart-exporter.nix
+    ./loki.nix
+    ./ntfy.nix # Phone push notifications via ntfy
+    ./dcgm-exporter.nix # NVIDIA DCGM hardware error tracking (ECC, PCIe)
+    ./grafana-alloy.nix # Log shipper to Loki (replaces promtail)
+    ./promtail.nix # Log aggregation to Loki
+    ./system-tools.nix # CLI monitoring tools (htop, iotop, nethogs, sysstat)
+  ];
+}

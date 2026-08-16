@@ -1,0 +1,39 @@
+name: doc-rot-guard
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'modules/**'
+      - 'hosts/**'
+      - 'kubernetes/**'
+      - 'justfile'
+
+concurrency:
+  group: doc-rot-guard
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  stale-check:
+    runs-on: [self-hosted, nixos]
+    steps:
+      # pin:actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Run documentation verification suite
+        run: |
+          nix develop --command just docs-audit
+
+      - name: Report documentation failure
+        if: failure()
+        run: |
+          echo "Documentation verification failed. Run 'just docs-audit' locally and fix the reported active-doc or link failure."
+          exit 1

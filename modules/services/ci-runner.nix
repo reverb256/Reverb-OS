@@ -1,0 +1,192 @@
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+with lib; let
+  cfg = config.services.ci-runner;
+  runnerHome = "/var/lib/${cfg.user}";
+  # Build script fragments conditionally to avoid null interpolation
+  getTokenCmd =
+    if cfg.tokenFile != null
+    then ''
+      TOKEN=$(cat "${cfg.tokenFile}")
+      echo "Using pre-generated runner token from ${cfg.tokenFile}"
+    ''
+    else if cfg.patFile != null
+    then ''
+      echo "Generating runner registration token from PAT..."
+      PAT=$(cat "${cfg.patFile}")
+      API_RESPONSE=$(curl -s -X POST \
+        -H "Authorization: Bearer $PAT" \
+        -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${cfg.repo}/actions/runners/registration-token")
+      TOKEN=$(echo "$API_RESPONSE" | jq -r '.token // empty')
+      if [ -z "$TOKEN" ]; then
+        echo "ERROR: Failed to generate runner token from PAT"
+        echo "API response: $API_RESPONSE"
+        exit 1
+      fi
+      echo "Successfully generated runner token"
+    ''
+    else ''
+      echo "ERROR: Neither tokenFile nor patFile is provided/available"
+      exit 1
+    '';
+in {
+  options.services.ci-runner = {
+    enable = mkEnableOption "GitHub Actions self-hosted runner";
+    user = mkOption {
+      type = types.str;
+      default = "runner";
+      description = "User to run the runner as";
+    };
+    repo = mkOption {
+      type = types.str;
+      example = "username/nixos-config";
+      description = "GitHub repository (owner/repo)";
+    };
+    tokenFile = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "Pre-generated runner token file (alternative to patFile)";
+    };
+    patFile = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "GitHub PAT file for auto-generating runner tokens via API";
+    };
+    autoStart = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Auto-start the runner service";
+    };
+    labels = mkOption {
+      type = types.listOf types.str;
+      default = ["nixos"];
+      description = "Runner labels";
+    };
+    extraLabels = mkOption {
+      type = types.listOf types.str;
+      default = [];
+      description = "Host-specific extra labels";
+    };
+  };
+
+  config = mkIf cfg.enable {
+    users.groups.${cfg.user} = {};
+    users.users.${cfg.user} = {
+      isSystemUser = true;
+      group = cfg.user;
+      description = "GitHub Actions runner";
+      home = runnerHome;
+      createHome = true;
+      # Shell for the runner's step execution (GitHub resets PATH per-step to a
+      # minimal FHS set; without a real login shell here, `sh` resolves to nothing).
+      shell = pkgs.bash;
+    };
+
+    # Full toolchain the workflows need (sh, bash, git, nix, coreutils, jq...).
+    # Without these on PATH the runner cannot execute any `run:` step.
+    environment.systemPackages = [
+      pkgs.bash
+      pkgs.git
+      pkgs.nix
+      pkgs.coreutils
+      pkgs.gnused
+      pkgs.gnugrep
+      pkgs.gnutar
+      pkgs.gzip
+      pkgs.findutils
+      pkgs.diffutils
+      pkgs.curl
+      pkgs.jq
+      # cachix-action uses the runner's system PATH after its best-effort
+      # nix-env install. Provision it declaratively so the action is reliable
+      # on NixOS, where the runner does not inherit a user login profile.
+      pkgs.cachix
+      pkgs.gh
+      (pkgs.github-runner-with-node20 or pkgs.github-runner)
+    ];
+
+    systemd.services.github-actions-runner = lib.mkIf cfg.autoStart {
+      description = "GitHub Actions Self-Hosted Runner";
+      after = ["network-online.target" "github-actions-runner-setup.service"];
+      wants = ["network-online.target"];
+      wantedBy = ["multi-user.target"];
+      serviceConfig = {
+        Type = "simple";
+        User = cfg.user;
+        WorkingDirectory = runnerHome;
+        ExecStart = "${(pkgs.github-runner-with-node20 or pkgs.github-runner)}/bin/Runner.Listener run";
+        ExecStop = "/bin/kill -INT $MAINPID";
+        Restart = "always";
+        RestartSec = "10s";
+        # NixOS has no FHS /usr/bin/sh. Force a PATH that includes the Nix store
+        # profile bin so `sh`/`bash`/`git`/`nix` resolve when GitHub resets PATH
+        # at step-exec time (root cause of 'sh: command not found' startup_failure).
+        Environment = [
+          "PATH=/run/current-system/sw/bin:/run/current-system/sw/sbin:${runnerHome}/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin"
+          "RUNNER_ROOT=${runnerHome}"
+          "LANG=C.UTF-8"
+        ];
+        ProtectSystem = "strict";
+        # Keep /run/current-system, the nix store, and sops secrets visible +
+        # executable under ProtectSystem=strict so steps can run shells and `nix`.
+        BindReadOnlyPaths = [
+          "/run/current-system"
+          "/nix/store"
+          "/run/secrets"
+          "/bin"
+          "/usr"
+        ];
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+        ReadWritePaths = [runnerHome];
+        # Issue #474: soft cgroup guard against runaway trusted jobs. Heavy
+        # compilation itself runs inside nix-daemon's cgroup, so this is a
+        # protective ceiling for the runner's own eval/shell steps, not a
+        # throttle on the build farm. Keep one runner and measure Nexus peak
+        # RAM before raising max-jobs or adding a second runner.
+        MemoryHigh = "32G";
+        MemoryMax = "40G";
+      };
+    };
+
+    systemd.services.github-actions-runner-setup = {
+      description = "GitHub Actions Runner Setup";
+      before = ["github-actions-runner.service"];
+      requiredBy = ["github-actions-runner.service"];
+      path = [pkgs.curl pkgs.jq (pkgs.github-runner-with-node20 or pkgs.github-runner)];
+      script = let
+        allLabels = lib.concatStringsSep "," (cfg.labels ++ cfg.extraLabels);
+      in ''
+        # Always re-register: wipe any stale config so config.sh can run fresh
+        rm -f "${runnerHome}/.runner" "${runnerHome}/.credentials" \
+              "${runnerHome}/.credentials_rsaparams" \
+              "${runnerHome}/.github-runner/.runner" \
+              "${runnerHome}/.github-runner/.credentials" \
+              "${runnerHome}/.github-runner/.credentials_rsaparams"
+        ${getTokenCmd}
+        ${(pkgs.github-runner-with-node20 or pkgs.github-runner)}/bin/config.sh \
+          --url "https://github.com/${cfg.repo}" \
+          --token "$TOKEN" \
+          --name "${config.networking.hostName}-runner" \
+          --labels "${allLabels}" \
+          --replace \
+          --unattended
+        echo "Runner configured successfully"
+      '';
+      environment = {
+        RUNNER_ROOT = runnerHome;
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = cfg.user;
+        WorkingDirectory = runnerHome;
+      };
+    };
+  };
+}

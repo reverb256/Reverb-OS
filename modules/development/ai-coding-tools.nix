@@ -1,0 +1,369 @@
+# AI Coding Tools - Harmonized MCP Configuration
+# Generates unified MCP server configs for: Droid (Factory), Claude Code, Crush, OpenCode
+# All tools get the same local MCP server set.
+#
+# API keys are read from agenix secrets at runtime (never hardcoded).
+# Required secrets: context7-api-key, nvidia-api-key
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cfg = config.services.ai-coding-tools;
+  inherit
+    (lib)
+    mkEnableOption
+    mkOption
+    mkIf
+    types
+    optionalString
+    ;
+  # AI Gateway URL (Kubernetes service)
+  gatewayUrl = "http://ai-inference-gateway.ai-inference.svc.cluster.local:8080";
+  # ---------------------------------------------------------------------------
+  # MCP server definitions + config generators -- extracted to sub-files
+  # per audit F-22 (2026-07-29 reconciliation). Source of truth is now
+  # ./ai-coding-tools/{mcp-defs,claude,droid,crush,opencode,pi}.nix.
+  nvidiaNimBaseUrl = "https://integrate.api.nvidia.com/v1";
+  mcpDefs = import ./ai-coding-tools/mcp-defs.nix { inherit lib; };
+  inherit (mcpDefs) mkMcpServersJson;
+
+  claudeGen = import ./ai-coding-tools/claude.nix {
+    inherit cfg pkgs mkMcpServersJson gatewayUrl;
+  };
+  droidGen = import ./ai-coding-tools/droid.nix {
+    inherit cfg pkgs gatewayUrl nvidiaNimBaseUrl mkMcpServersJson;
+  };
+  crushGen = import ./ai-coding-tools/crush.nix {
+    inherit cfg pkgs gatewayUrl nvidiaNimBaseUrl mkMcpServersJson;
+  };
+  opencodeGen = import ./ai-coding-tools/opencode.nix {
+    inherit cfg pkgs gatewayUrl nvidiaNimBaseUrl mkMcpServersJson;
+  };
+  piGen = import ./ai-coding-tools/pi.nix {
+    inherit cfg pkgs gatewayUrl nvidiaNimBaseUrl mkMcpServersJson;
+  };
+
+  inherit (claudeGen) mkClaudeMcpJson;
+  inherit (droidGen) mkDroidMcpJson mkDroidSettings;
+  inherit (crushGen) mkCrushConfig;
+  inherit (opencodeGen) mkOpencodeConfig;
+  inherit (piGen) mkPiConfig;
+
+in {
+  options.services.ai-coding-tools = {
+    enable = mkEnableOption "Harmonized MCP configuration for all AI coding tools (Droid, Claude Code, Crush, OpenCode, Pi)";
+    user = mkOption {
+      type = types.str;
+      default = "j_kro";
+      description = "User for AI coding tool configs";
+    };
+    context7ApiKeyFile = mkOption {
+      type = types.path;
+      default = "/run/secrets/context7-api-key";
+      description = "Path to Context7 API key (agenix secret)";
+    };
+    nvidiaNimApiKeyFile = mkOption {
+      type = types.path;
+      default = "/run/secrets/nvidia-api-key";
+      description = "Path to NVIDIA NIM API key (agenix secret)";
+    };
+    tools = {
+      droid = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Generate Factory Droid MCP config (~/.factory/mcp.json)";
+        };
+      };
+      claude = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Generate Claude Code MCP config (~/.config/claude/mcp.json)";
+        };
+      };
+      crush = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Generate Crush MCP config (~/.config/crush/crush.json)";
+        };
+      };
+      pi = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Generate Pi Coding Agent config (~/.pi/agent/settings.json, models.json)";
+        };
+        packages = mkOption {
+          type = types.listOf types.str;
+          default = [];
+          example = [
+            "npm:pi-lens@3.8.5"
+            "npm:pi-powerline-footer@0.4.9"
+          ];
+          description = ''
+            Declarative pi packages for global settings (~/.pi/agent/settings.json).
+            These survive NixOS activation. Use `pi install -l <pkg>` for
+            project-scoped packages (written to .pi/settings.json, not touched
+            by this module).
+          '';
+        };
+      };
+      opencode = {
+        enable = mkOption {
+          type = types.bool;
+          default = true;
+          description = "Generate OpenCode config with MCP servers (~/.opencode/config.json)";
+        };
+      };
+    };
+    # Environment variables for API-backed MCP servers and shell sessions
+    enableShellEnv = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Set Context7 and related API variables in shell sessions";
+    };
+  };
+  config = mkIf cfg.enable {
+    # Ensure MCP servers module is enabled (provides mcp-* commands)
+    services.mcp-servers = {
+      enable = true;
+      servers.playwright.enable = true;
+      servers.context7.apiKeyFile = cfg.context7ApiKeyFile;
+    };
+    # Pre-create the per-user config dirs at ACTIVATION (before multi-user).
+    # The systemd.tmpfiles.rules below run as part of systemd-tmpfiles-setup,
+    # but a namespace-unit (ProtectSystem=strict + ReadWritePaths) whose target
+    # dir is absent at namespace setup fails with status=226/NAMESPACE. Creating
+    # them here, in the activation script ordering, guarantees they exist before
+    # ai-coding-tools-config.service (or any other unit) builds its mount
+    # namespace. (root cause 2026-08-10)
+    system.activationScripts.ai-coding-tools-dirs = lib.stringAfter [ "users" ] ''
+      install -d -m 0755 -o ${cfg.user} -g users /home/${cfg.user}/.config/claude
+      install -d -m 0755 -o ${cfg.user} -g users /home/${cfg.user}/.config/crush
+      install -d -m 0755 -o ${cfg.user} -g users /home/${cfg.user}/.opencode
+      install -d -m 0700 -o ${cfg.user} -g users /home/${cfg.user}/.pi/agent
+    '';
+
+    # Ensure required directories exist
+    systemd.tmpfiles.rules = [
+      "d /home/${cfg.user}/.factory 0700 ${cfg.user} users -"
+      # Note: .factory/mcp.json is created as a FILE by the activation script,
+      # NOT as a directory. Do NOT add a 'd' tmpfiles rule for it.
+      "d /home/${cfg.user}/.config/claude 0755 ${cfg.user} users -"
+      "d /home/${cfg.user}/.config/crush 0755 ${cfg.user} users -"
+      "d /home/${cfg.user}/.config/crush/commands 0755 ${cfg.user} users -"
+      "d /home/${cfg.user}/.opencode 0755 ${cfg.user} users -"
+      "d /home/${cfg.user}/.pi/agent 0700 ${cfg.user} users -"
+      "d /home/${cfg.user}/.pi/agent/sessions 0700 ${cfg.user} users -"
+    ];
+    # Shell environment variables available to all tools
+    environment.sessionVariables = mkIf cfg.enableShellEnv {
+      CONTEXT7_API_KEY_FILE = cfg.context7ApiKeyFile;
+      NVIDIA_NIM_API_KEY_FILE = cfg.nvidiaNimApiKeyFile;
+    };
+    # Systemd service to generate all configs after secrets are available
+    systemd.services.ai-coding-tools-config = {
+      description = "Generate harmonized MCP configs for AI coding tools";
+      after = [
+        "agenix.service"
+        "network.target"
+        # tmpfiles MUST run first: the ReadWritePaths below point at
+        # ~/.config/claude and ~/.config/crush, created by the
+        # systemd.tmpfiles.rules in this same module. If tmpfiles hasn't run,
+        # those dirs are absent at namespace setup and systemd fails the unit
+        # with status=226/NAMESPACE (confirmed root cause 2026-08-10).
+        "systemd-tmpfiles-setup.service"
+      ];
+      requires = ["systemd-tmpfiles-setup.service"];
+      wants = ["agenix.service"];
+      wantedBy = ["multi-user.target"];
+      path = [
+        pkgs.jq
+        pkgs.coreutils
+        pkgs.gnugrep
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        User = "root";
+        Group = "root";
+        RemainAfterExit = true;
+        # Security
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        ProtectSystem = "strict";
+        ProtectHome = "no";
+        ReadWritePaths = [
+          "/home/${cfg.user}/.factory"
+          "/home/${cfg.user}/.config/claude"
+          "/home/${cfg.user}/.config/crush"
+          "/home/${cfg.user}/.opencode"
+          "/home/${cfg.user}/.pi"
+        ];
+        ExecStart = pkgs.writeShellScript "ai-coding-tools-generate" ''
+                set -euo pipefail
+                # Wait for secrets to be available
+                for secret in ${cfg.context7ApiKeyFile} ${cfg.nvidiaNimApiKeyFile}; do
+                  for i in {1..30}; do
+                    if [ -f "$secret" ] && [ -s "$secret" ]; then
+                      break
+                    fi
+                    if [ "$i" -eq 30 ]; then
+                      echo "[ai-coding-tools] WARNING: Secret not available: $secret"
+                    fi
+                    sleep 1
+                  done
+                done
+                export CTX7_KEY_PATH="${cfg.context7ApiKeyFile}"
+                CONTEXT7_API_KEY="$(cat $CTX7_KEY_PATH 2>/dev/null || echo)"
+                export NVIDIA_NIM_KEY_PATH="${cfg.nvidiaNimApiKeyFile}"
+                NVIDIA_NIM_API_KEY="$(cat $NVIDIA_NIM_KEY_PATH 2>/dev/null || echo)"
+                echo "[ai-coding-tools] Generating harmonized MCP configs..."
+                ${optionalString cfg.tools.droid.enable ''
+            echo "[ai-coding-tools] Generating Droid settings..."
+            ${mkDroidSettings}
+            echo "[ai-coding-tools] Generating Droid MCP config..."
+            ${mkDroidMcpJson}
+          ''}
+                ${optionalString cfg.tools.claude.enable ''
+            echo "[ai-coding-tools] Generating Claude Code config..."
+            ${mkClaudeMcpJson}
+          ''}
+                ${optionalString cfg.tools.crush.enable ''
+            echo "[ai-coding-tools] Generating Crush config..."
+            ${mkCrushConfig}
+          ''}
+                ${optionalString cfg.tools.opencode.enable ''
+            echo "[ai-coding-tools] Generating OpenCode config..."
+            ${mkOpencodeConfig}
+          ''}
+                ${optionalString cfg.tools.pi.enable ''
+            echo "[ai-coding-tools] Generating Pi config..."
+            ${mkPiConfig}
+          ''}
+                echo "[ai-coding-tools] All configs generated successfully"
+        '';
+      };
+    };
+    # Fish shell integration (read secrets into env for interactive use)
+    programs.fish.interactiveShellInit = mkIf cfg.enableShellEnv ''
+      # AI Coding Tools - Load API keys from sops secrets
+      if test -f ${cfg.context7ApiKeyFile}
+        set -gx CONTEXT7_API_KEY (cat ${cfg.context7ApiKeyFile})
+      end
+    '';
+    # Bash integration
+    programs.bash.interactiveShellInit = mkIf cfg.enableShellEnv ''
+      # AI Coding Tools - Load API keys from sops secrets
+      if [ -f ${cfg.context7ApiKeyFile} ]; then
+        CTX7_KEY_PATH="${cfg.context7ApiKeyFile}"
+        export CONTEXT7_API_KEY="$(cat $CTX7_KEY_PATH)"
+      fi
+    '';
+    # CLI helper for manual regeneration
+    environment.systemPackages = [
+      # Crush wrapper - npm package @charmland/crush
+      (pkgs.writeShellScriptBin "crush" ''
+        export PATH="${pkgs.nodejs_22}/bin:$PATH"
+        export npm_config_cache="/var/cache/ai-inference/npm"
+        exec ${pkgs.nodejs_22}/bin/npx -y @charmland/crush@latest "$@"
+      '')
+      # Pi wrapper - npm package @mariozechner/pi-coding-agent
+      (pkgs.writeShellScriptBin "pi" ''
+        export PATH="${pkgs.nodejs_22}/bin:$PATH"
+        export npm_config_cache="/var/cache/ai-inference/npm"
+        exec ${pkgs.nodejs_22}/bin/npx -y @mariozechner/pi-coding-agent@latest "$@"
+      '')
+      (pkgs.writeShellScriptBin "ai-tools-regenerate" ''
+        #!/bin/bash
+        echo "Regenerating all AI coding tool MCP configs..."
+        sudo systemctl restart ai-coding-tools-config.service
+        journalctl -u ai-coding-tools-config.service -n 20 --no-pager
+      '')
+      (pkgs.writeShellScriptBin "ai-tools-status" ''
+        #!/bin/bash
+        echo "=== AI Coding Tools Status ==="
+        echo ""
+        echo "Config files:"
+        for f in \
+          "/home/${cfg.user}/.factory/mcp.json" \
+          "/home/${cfg.user}/.config/claude/mcp.json" \
+          "/home/${cfg.user}/.config/crush/crush.json" \
+          "/home/${cfg.user}/.opencode/config.json" \
+          "/home/${cfg.user}/.pi/agent/settings.json" \
+          "/home/${cfg.user}/.pi/agent/models.json"; do
+          if [ -f "$f" ]; then
+            servers=$(${pkgs.jq}/bin/jq -r '[.mcpServers // .mcp | keys[]] | length' "$f" 2>/dev/null || echo "?")
+            echo "  ✓ $f ($servers MCP servers)"
+          else
+            echo "  ✗ $f (missing)"
+          fi
+        done
+        echo ""
+        echo "Secrets:"
+        for s in ${cfg.context7ApiKeyFile} ${cfg.nvidiaNimApiKeyFile}; do
+          if [ -f "$s" ] && [ -s "$s" ]; then
+            echo "  ✓ $s"
+          else
+            echo "  ✗ $s (missing)"
+          fi
+        done
+        echo ""
+        echo "MCP wrapper commands:"
+        for cmd in mcp-filesystem mcp-git mcp-fetch mcp-playwright mcp-context7 mcp-gateway-bridge; do
+          if command -v "$cmd" &>/dev/null; then
+            echo "  ✓ $cmd"
+          else
+            echo "  ✗ $cmd (not in PATH)"
+          fi
+        done
+      '')
+    ];
+    # Documentation
+    environment.etc."ai-coding-tools/README.md".text = ''
+      # AI Coding Tools - Harmonized MCP Configuration
+      Managed by: `services.ai-coding-tools` NixOS module
+      Regenerate: `ai-tools-regenerate`
+      Status:     `ai-tools-status`
+      ## Unified Provider Set
+      | Provider | Endpoint | Key Source | Tools |
+      |----------|----------|------------|-------|
+      | K8s AI Gateway | ai-inference-gateway:8080/v1 | None (internal) | OpenCode, Crush, Pi, Droid |
+      | NVIDIA NIM | integrate.api.nvidia.com/v1 | sops secret | OpenCode, Crush, Pi, Droid |
+      | LM Studio | 127.0.0.1:8080/v1 | None (local) | OpenCode, Crush, Pi |
+      ## Unified MCP Server Set
+      | Server | Type | Purpose | All Tools |
+      |--------|------|---------|-----------|
+      | filesystem | stdio | Local filesystem access | Yes |
+      | git | stdio | Git operations | Yes |
+      | fetch | stdio | Web fetching | Yes |
+      | playwright | stdio | Browser automation | Yes |
+      | context7 | stdio | Documentation search | Yes |
+      | chrome-devtools | stdio | Chrome debugging | Yes |
+      | gateway | stdio | AI Inference Gateway bridge | Yes |
+      | nixos | stdio | NixOS helper (uvx) | Claude only |
+      ## Tool Config Locations
+      | Tool | Config Path | Format |
+      |------|------------|--------|
+       | Droid (Factory) | ~/.factory/mcp.json | MCP servers only |
+      | Claude Code | ~/.config/claude/mcp.json | MCP servers only |
+      | Crush | ~/.config/crush/crush.json | Provider + MCP |
+      | OpenCode | ~/.opencode/config.json | Provider + MCP |
+      | Pi Coding Agent | ~/.pi/agent/settings.json | Provider + models |
+      ## CLI Wrappers
+      | Tool | Command | Source |
+      |------|---------|--------|
+      | Crush | `crush` | npx @charmland/crush@latest |
+      | Pi | `pi` | npx @mariozechner/pi-coding-agent@latest |
+      ## API Keys
+      All keys managed via agenix secrets:
+      - context7-api-key → /run/secrets/context7-api-key
+      - nvidia-api-key → /run/secrets/nvidia-api-key
+      Keys are loaded into shell environment (fish/bash) and referenced
+      in configs at generation time.
+    '';
+  };
+}

@@ -1,0 +1,354 @@
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}: let
+  cluster = config.networking.cluster;
+  inherit (lib) mkIf mkBefore mkDefault;
+  clusterCfg = config.clusterNetworking;
+  # Cluster host IPs (hardcoded for reliability)
+  hosts = {
+    zephyr = "${cluster.hosts.zephyr.ip}";
+    nexus = "${cluster.hosts.nexus.ip}";
+    forge = cluster.hosts.forge.ip;
+    sentry = "${cluster.hosts.sentry.ip}";
+  };
+  # Get DNS config - use or {} for safety in case the option doesn't exist
+  dnsCfg = {
+    enable = clusterCfg.unbound.enable or false;
+    listenAddress = clusterCfg.unbound.listenAddress or null;
+    upstreamServers = [
+      "1.1.1.1@853"
+      "1.0.0.1@853"
+      "8.8.8.8@853"
+      "8.8.4.4@853"
+    ];
+    searchDomains = ["cluster.local"] ++ (config.networking.search or []);
+    enableLanRecords = true;
+    enableServiceRecords = true;
+  };
+
+  # ── Service domain definitions (SSOT for .lan domains) ──────────────────
+  # These lists define ALL .lan domains. They feed into:
+  #   1. Unbound DNS records (local-data)
+  #   2. clusterNetworking.lanDomains (consumed by cluster-ca.nix for TLS SANs)
+  #   3. /etc/hosts compatibility entries
+  # To add a new .lan service: add it to the appropriate list below.
+  # The domain will automatically appear in DNS, TLS certs, and /etc/hosts.
+
+  # All ingress services route through Caddy via VIP (10.1.1.100)
+  vip = "10.1.1.100";
+
+  # Services via Caddy Ingress (accessed via VIP)
+  ingressServiceDomains = ["search.lan"];
+
+  # Services proxied via Caddy via VIP (single stable entry point)
+  hostServiceDomains = [
+    "ai-inference.lan"
+    "auth.lan"
+    "qdrant.lan"
+    "n8n.lan"
+    "mission-control.lan"
+    "grafana.lan"
+    "privacy-filter.lan"
+    "workspace.lan"
+    "dashboard.lan"
+    "maplespike.lan"
+    "api.maplespike.lan"
+    "mcp.maplespike.lan"
+    "auth.maplespike.lan"
+    "status.maplespike.lan"
+    "uptime.maplespike.lan"
+    "haven.lan"
+    "dev.maplespike.lan"
+    "dev-api.maplespike.lan"
+    "dev-mcp.maplespike.lan"
+    "gitea.lan"
+    "openwebui.lan"
+    "ai.lan"
+  ];
+
+  # Forge-specific services
+  forgeServiceDomains = ["mining.lan"];
+
+  # Sentry-specific services
+  sentryServiceDomains = ["monitoring.lan" "prometheus.lan" "alertmanager.lan"];
+
+  # Hermes Agent services (runs on nexus as systemd)
+  hermesServiceDomains = ["hermes.lan" "api.hermes.lan"];
+
+  # Tailscale mobile devices
+  tailscaleDomains = ["seeker.lan" "reverb256.lan"];
+
+  # All .lan domains combined — this is the SSOT list
+  allLanDomains =
+    ingressServiceDomains
+    ++ hostServiceDomains
+    ++ forgeServiceDomains
+    ++ sentryServiceDomains ++ hermesServiceDomains ++ tailscaleDomains;
+
+  # Convert domain list to Unbound local-data records
+  # Maps domain → IP based on which list it belongs to
+  domainToIp = domain:
+    if builtins.elem domain ingressServiceDomains
+    then vip
+    else if builtins.elem domain hostServiceDomains
+    then vip # VIP routes to Caddy for TLS termination
+    else if builtins.elem domain forgeServiceDomains
+    then hosts.forge
+    else if builtins.elem domain sentryServiceDomains
+    then hosts.sentry
+    else if builtins.elem domain hermesServiceDomains
+    then hosts.nexus
+    else if domain == "seeker.lan"
+    then "100.84.24.43"
+    else if domain == "reverb256.lan"
+    then "10.15.39.199"
+    else vip; # fallback
+
+  # Generate Unbound local-data records from domain lists
+  ingressServices = map (d: "${d}. IN A ${domainToIp d}") ingressServiceDomains;
+  hostServices = map (d: "${d}. IN A ${domainToIp d}") hostServiceDomains;
+  forgeServices = map (d: "${d}. IN A ${domainToIp d}") forgeServiceDomains;
+  sentryServices = map (d: "${d}. IN A ${domainToIp d}") sentryServiceDomains;
+  hermesServices = map (d: "${d}. IN A ${domainToIp d}") hermesServiceDomains;
+
+  # All service records combined
+  allServices = ingressServices ++ hostServices ++ forgeServices ++ sentryServices ++ hermesServices;
+
+  # Host records
+  hostRecords = lib.mapAttrsToList (name: ip: "${name}.lan. IN A ${ip}") hosts;
+in {
+  config = mkIf dnsCfg.enable {
+    # Export .lan domain list (SSOT for cluster-ca.nix TLS SANs)
+    clusterNetworking.lanDomains = allLanDomains;
+    # Disable systemd-resolved (conflicts with unbound)
+    services.resolved.enable = mkDefault false;
+
+    # Configure unbound
+    services.unbound = {
+      enable = true;
+
+      settings = {
+        server = {
+          domain-insecure = [
+            "cluster.local."
+          ];
+          # Listen on localhost and cluster IP
+          interface = [
+            "127.0.0.1"
+            "::1"
+            (
+              if dnsCfg.listenAddress != null && dnsCfg.listenAddress != "127.0.0.1"
+              then dnsCfg.listenAddress
+              else if clusterCfg.ipAddress != null
+              then clusterCfg.ipAddress
+              else "127.0.0.1"
+            )
+            # VIP for HA DNS — Unbound must listen here so queries to
+            # 10.1.1.100:53 are answered by whichever node has the VIP.
+            cluster.kubernetes.vip
+          ];
+
+          # Allow queries from cluster network
+          access-control = [
+            "127.0.0.0/8 allow"
+            "10.1.1.0/24 allow"
+            "10.42.0.0/16 allow"
+            "::1 allow"
+            "fd00::8 allow"
+          ];
+
+          # Performance tuning
+          num-threads = 4;
+          msg-cache-size = "128m";
+          rrset-cache-size = "128m";
+
+          # Privacy and security
+          hide-identity = true;
+          hide-version = true;
+          tls-cert-bundle = "/etc/ssl/certs/ca-bundle.crt";
+
+          # Include local DNS records
+          local-zone = [
+            "lan. transparent"
+            "cluster.local. transparent"
+          ];
+          # All records generated below in environment.etc."unbound/local-dns.conf"
+          # Do NOT add a separate extra file — see cluster-dns.nix for the full list
+          include = ["/etc/unbound/local-dns.conf"];
+
+          # Don't query localhost (prevent loops)
+          do-not-query-localhost = true;
+
+          # NOTE: `forward-first` was REMOVED from unbound in 1.21.0. On the
+          # moving nixos-26.05 branch unbound 1.25.1 is pulled, which rejects
+          # the directive as a syntax error and refuses to start (taking down
+          # cluster DNS and blocking all `nixos-rebuild switch` activations).
+          # Modern unbound already falls back to recursive resolution when
+          # forwarders are unreachable, so dropping the option preserves the
+          # original resilience intent without the fatal syntax error.
+        };
+
+        # Forward zones
+        forward-zone = [
+          # K8s cluster DNS → CoreDNS (enables host-level K8s service resolution)
+
+          {
+            name = "cluster.local.";
+            forward-addr = [config.networking.cluster.kubernetes.clusterDnsIP];
+          }
+          # Tailscale MagicDNS (ts.net domains)
+          {
+            name = "ts.net.";
+            forward-addr = ["100.100.100.100" "fd7a:115c:a1e0::53"];
+          }
+          # Internet DNS via TLS forwarders (fast, authenticated)
+          # Self-contained here — no dependency on unbound-common
+          {
+            name = ".";
+            forward-addr = dnsCfg.upstreamServers;
+            forward-tls-upstream = true;
+          }
+        ];
+      };
+    };
+
+    # Survive failed nixos-rebuild: reload (SIGHUP) instead of stop/start.
+    # If activation crashes mid-switch, unbound stays running.
+    systemd.services.unbound = {
+      restartIfChanged = true; # Must restart (not just reload) to pick up new interface bindings like the VIP
+
+      # Protect from OOM killer — DNS is cluster-critical infrastructure.
+      # System has heavy memory pressure (27/31G used, 7.2/7.8G swap).
+      # With default OOMScoreAdjust=0, unbound's oom_score=666 makes it
+      # an easy kill target. -1000 = immune to OOM killer.
+      serviceConfig.OOMScoreAdjust = -1000;
+    };
+
+    # Self-healing watchdog: if unbound isn't listening on :53 (crashed,
+    # OOM-killed despite the score above, or failed to bind), restart it.
+    # Without this, a dead unbound leaves the node 100% DNS-blind until the
+    # next manual switch. Runs every minute; idempotent; never fails the unit.
+    systemd.services.unbound-watchdog = {
+      description = "Restart unbound if it stops answering on :53";
+      wantedBy = ["multi-user.target"];
+      after = ["unbound.service"];
+      path = [pkgs.bash pkgs.coreutils pkgs.iproute2];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+
+        if ! ss -uln 2>/dev/null | grep -q ':53'; then
+          echo "unbound-watchdog: no listener on :53 — restarting unbound"
+          ${config.systemd.package}/bin/systemctl restart unbound || true
+        fi
+      '';
+    };
+    systemd.timers.unbound-watchdog = {
+      wantedBy = ["timers.target"];
+      timerConfig = {
+        OnBootSec = "30s";
+        OnUnitActiveSec = "60s";
+        Unit = "unbound-watchdog.service";
+      };
+    };
+
+    # Generate local DNS records
+    # NOTE: this file is pulled in via `include:` from WITHIN the main
+    # `server:` block of unbound.conf, so it must contain ONLY local-data /
+    # local-zone directives. A nested `server:` header here is a hard syntax
+    # error in unbound (it rejects nested server blocks) and prevents unbound
+    # from starting. Interfaces, access-control and the lan./cluster.local.
+    # zones are already declared in the main server block above.
+    environment.etc."unbound/local-dns.conf".text =
+      (lib.optionalString dnsCfg.enableLanRecords (
+        lib.concatMapStrings (record: "local-data: \"${record}\"\n") hostRecords
+      ))
+      +
+      # Service records section
+      (lib.optionalString dnsCfg.enableServiceRecords (
+        lib.concatMapStrings (record: "local-data: \"${record}\"\n") allServices
+      ))
+      +
+      # Tailscale mobile device
+      "local-data: \"seeker.lan. IN A 100.84.24.43\"\n";
+
+    # Static resolv.conf (prevent DHCP overrides)
+    # Resilient: 127.0.0.1 (local unbound) is primary, but nexus (10.1.1.120,
+    # always-on resolver) is a fallback nameserver so a node is NEVER 100%
+    # DNS-blind if its own unbound is briefly down (crash/restart). glibc
+    # tries nameservers in order; the local one answers normally, nexus only
+    # gets used on local failure.
+    environment.etc."resolv.conf".text = ''
+      # Generated by NixOS cluster-dns module - DO NOT MODIFY
+      # Single source of truth: /etc/nixos/modules/network/cluster-dns.nix
+      ${lib.concatStringsSep "\n" (map (d: "search ${d}") dnsCfg.searchDomains)}
+      nameserver 127.0.0.1
+      nameserver ::1
+      nameserver 10.1.1.120
+      options edns0 trust-ad single-request-reopen timeout:2 attempts:2
+    '';
+
+    # Prefer IPv4 for getaddrinfo when both A and AAAA exist — avoids hangs on
+    # broken or blackholed v6 paths while keeping ::1 / Tailscale v6 usable.
+    environment.etc."gai.conf".text = ''
+      label ::1/128       0
+      label ::/0          1
+      label 2002::/16     2
+      label ::/0          3
+      label ::/0          4
+      precedence ::ffff:0:0/96  100
+    '';
+
+    # Disable resolvconf — we manage /etc/resolv.conf directly
+    networking.resolvconf.enable = false;
+
+    # NetworkManager: don't manage DNS, we use unbound
+    networking.networkmanager.dns = mkDefault "none";
+
+    # Firewall: allow DNS traffic
+    networking.firewall = {
+      allowedUDPPorts = lib.mkOptionDefault [53];
+      allowedTCPPorts = lib.mkOptionDefault [53];
+      extraInputRules = lib.mkAfter ''
+        ip saddr { 10.1.1.0/24, 10.42.0.0/16 } udp dport 53 accept
+        ip saddr { 10.1.1.0/24, 10.42.0.0/16 } tcp dport 53 accept
+      '';
+    };
+
+    # NOTE: Do NOT add a static route for the K8s service CIDR (10.43.0.0/16).
+    # kube-proxy handles ClusterIP translation via iptables/nftables; routing
+    # Calico manages service IPs directly. Ensure no bypass.
+    # service discovery (e.g., CoreDNS).
+
+    # Populate /etc/hosts for compatibility
+    networking.extraHosts = lib.mkBefore (
+      let
+        allHosts =
+          hosts
+          // {
+            ai-inference = vip; # VIP Caddy
+            qdrant = vip; # VIP Caddy
+            search = vip; # VIP Caddy
+            n8n = vip; # VIP Caddy
+            haven = vip; # VIP Caddy
+            grafana = vip; # VIP Caddy
+            prometheus = hosts.sentry;
+            monitoring = hosts.sentry;
+            mining = hosts.forge;
+            mission-control = vip; # VIP Caddy
+            workspace = vip; # VIP Caddy
+            privacy-filter = vip; # VIP Caddy
+          };
+      in
+        lib.pipe allHosts [
+          (lib.mapAttrsToList (name: ip: "${ip} ${name}.lan ${name}"))
+          (lib.concatStringsSep "\n")
+        ]
+    );
+  };
+}

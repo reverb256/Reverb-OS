@@ -1,0 +1,151 @@
+# Calico Network Policies - Enforced
+#
+# Zero-trust network security for the cluster (East/West pod traffic).
+# All traffic that doesn't match Allow rules is denied.
+#
+# CIDR Ranges (MUST match the cluster — see modules/services/k3s-cluster.nix):
+# - 10.1.1.0/24:   Physical cluster network (node IPs)
+# - 10.42.0.0/16:  Kubernetes pod network (Calico IP pool = k3s --cluster-cidr)
+# - 10.43.0.0/16:  Kubernetes service network (k3s --service-cidr)
+# - 100.64.0.0/10:  Tailscale VPN network
+#
+# NodePorts:
+# - 30080: Caddy Ingress HTTP
+# - 30443: Caddy Ingress HTTPS
+# - 6443:  Kubernetes API Server
+#
+# NOTE: preDNAT is intentionally false. A deny-all GlobalNetworkPolicy with
+# preDNAT: true also filters NodePort/ingress DNAT traffic and can lock out the
+# Caddy ingress path. This policy governs pod-to-pod East/West only.
+# The kubernetes/network-policies dir (applied BEFORE this one) handles
+# per-namespace default-deny via standard NetworkPolicy objects.
+---
+apiVersion: crd.projectcalico.org/v1
+kind: GlobalNetworkPolicy
+metadata:
+  name: default-deny-enforced
+  annotations:
+    description: |
+      Default-deny policy in ENFORCEMENT mode (East/West pod traffic).
+      Blocks all pod traffic not explicitly allowed.
+spec:
+  namespaceSelector: all()
+  order: 1000
+  applyOnForward: true
+  types:
+  - Ingress
+  - Egress
+
+  ingress:
+  - action: Allow
+    source:
+      nets:
+      - 10.1.1.0/24
+  - action: Allow
+    source:
+      nets:
+      - 10.42.0.0/16
+  - action: Allow
+    source:
+      nets:
+      - 10.43.0.0/16
+  - action: Allow
+    source:
+      nets:
+      - 100.64.0.0/10
+  - action: Allow
+    destination:
+      ports:
+      - 30080
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 80
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 30443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 6443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 53
+    protocol: UDP
+  - action: Allow
+    destination:
+      ports:
+      - 53
+    protocol: TCP
+  - action: Deny
+    source:
+      nets:
+      - 0.0.0.0/0
+
+  egress:
+  - action: Allow
+    destination:
+      nets:
+      - 10.1.1.0/24
+  - action: Allow
+    destination:
+      nets:
+      - 10.42.0.0/16
+  - action: Allow
+    destination:
+      nets:
+      - 10.43.0.0/16
+  - action: Allow
+    destination:
+      nets:
+      - 100.64.0.0/10
+  - action: Allow
+    destination:
+      ports:
+      - 30080
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 80
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 30443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 6443
+    protocol: TCP
+  - action: Allow
+    destination:
+      ports:
+      - 53
+    protocol: UDP
+  - action: Allow
+    destination:
+      ports:
+      - 53
+    protocol: TCP
+  - action: Deny
+    destination:
+      nets:
+      - 0.0.0.0/0

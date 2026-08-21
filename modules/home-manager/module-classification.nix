@@ -46,6 +46,12 @@
     "zen-browser.nix"
   ];
 
+  # Ported 2026-08-21 from portableAdditive into the omarchy profile.
+  portableAdditivePorted = [
+    "appimage-updater.nix"
+    "home-manager-launcher.nix"
+  ];
+
   # Niri is additive, but these existing modules carry host-specific or
   # compositor/runtime assumptions. The generic profile uses its own portable
   # composition instead of importing them wholesale.
@@ -98,6 +104,9 @@
       "ported/tui-apps.nix"
       "ported/vesktop.nix"
       "ported/zen-browser.nix"
+      # Ported 2026-08-21 (portableAdditivePorted)
+      "ported/appimage-updater.nix"
+      "ported/home-manager-launcher.nix"
     ];
   };
   profileOwnedModules = [

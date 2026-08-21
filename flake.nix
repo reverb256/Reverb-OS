@@ -315,6 +315,9 @@
               ./modules/home-manager/ported/tui-apps.nix
               ./modules/home-manager/ported/vesktop.nix
               ./modules/home-manager/ported/zen-browser.nix
+              # Ported 2026-08-21 (portableAdditivePorted)
+              ./modules/home-manager/ported/appimage-updater.nix
+              ./modules/home-manager/ported/home-manager-launcher.nix
             ];
           };
 

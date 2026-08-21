@@ -5,6 +5,7 @@ let
   sourceFiles = [
     ../modules/home-manager/omarchy.nix
     ../modules/home-manager/niri-omarchy.nix
+    ../modules/home-manager/rclone.nix
   ];
   forbidden = [
     "environment.systemPackages"

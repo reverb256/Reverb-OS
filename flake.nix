@@ -300,6 +300,7 @@
               ./modules/home-manager/ported/git.nix
               ./modules/home-manager/ported/gl-desktop-entry.nix
               ./modules/home-manager/ported/helix-desktop-entry.nix
+              ./modules/home-manager/ported/hermes.nix
               ./modules/home-manager/ported/hermes-gateway.nix
               # hermes-skin.nix deferred: it generates the Hermes skin from
               # stylix colors (config.lib.stylix). Stylix is deferred to Omarchy

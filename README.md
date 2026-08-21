@@ -1,10 +1,23 @@
-# NixOS Cluster Configuration
+# Reverb-OS — Cluster Platform
 
-> **Status:** Canonical project entry point
-> **Last Verified:** 2026-08-09
+> **Target desktop:** upstream Omarchy/Arch with the standalone Reverb-OS Home Manager profile.
+
+> **Status:** Canonical project entry point / migration in progress
+> **Last Verified:** 2026-08-20
 > **Owner:** j_kro
 
-Flake-based multi-host NixOS configuration for a 4-node cluster.
+Reverb-OS is a 4-host cluster platform being reshaped around the
+upstream Omarchy/Arch with standalone Home Manager layered above it. Reverb-OS
+adds only capabilities that Omarchy does not already provide and does not fork
+or replace Omarchy's runtime. The live fleet remains
+NixOS during the migration; this repository preserves the current evaluator as
+a rollback path while the target profiles are built and tested.
+
+Read the target architecture first:
+
+- [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](docs/plans/2026-08-20-omarchy-hm-cluster-vision.md)
+- [`docs/current-state.md`](docs/current-state.md)
+- [`.research/omarchy-design-philosophy-2026-08-20.md`](.research/omarchy-design-philosophy-2026-08-20.md)
 
 ## Quick Start
 
@@ -27,6 +40,21 @@ just check
 
 ## Cluster Architecture
 
+### Target authority model
+
+```text
+Omarchy/Arch  →  base OS, updates, migrations, snapshots, hardware, Quickshell
+Home Manager  →  additive user layer and supported Omarchy extensions
+Nix/Lix       →  packages, cache, checks, flakes, manifests, test artifacts
+Kubernetes    →  portable cluster services by default
+NixOS         →  transitional live evaluator and rollback path
+```
+
+Omarchy remains the coherent product authority, not a collection of files to
+reimplement in Nix. Reverb-OS defers to Omarchy wherever Omarchy already
+provides a capability or supported configuration mechanism. Do not edit `/usr/share/omarchy`, replace `omarchy update`,
+or let Home Manager overwrite Omarchy-owned desktop state.
+
 **Nodes:**
 - **Zephyr** (10.1.1.110) - Control plane, gaming, AI inference
 - **Nexus** (10.1.1.120) - Storage, GPU computing, Hermes Agent gateway
@@ -38,8 +66,13 @@ These are planning/inventory values; verify live hardware before operational dec
 
 ## Build Architecture
 
-The NixOS target is the generic `x86_64-linux` platform. This repository does
-**not** apply `-march=x86-64-v3` globally to the complete userspace.
+The current NixOS evaluator remains available during migration. The target
+Omarchy platform is an Arch/Omarchy runtime; Nix is retained as the reproducible
+package, cache, test, and artifact toolchain rather than the target desktop
+activation authority.
+
+For the current NixOS path, the target is generic `x86_64-linux`. This repository
+does **not** apply `-march=x86-64-v3` globally to the complete userspace.
 
 - All hosts use the CachyOS `linuxPackages-...-x86_64-v3` kernel package.
 - Selected llama.cpp packages are explicitly compiled with
@@ -71,12 +104,21 @@ state as current.
 
 ## Project Architecture
 
-**⚠️ IMPORTANT:** Home Manager leaf configuration is maintained in a separate repository
-[`reverb256/home-manager-config`](https://github.com/reverb256/home-manager-config) (at
-`/home/j_kro/Projects/home-manager-config`). It is consumed here as the
-`home-manager-config` flake input. This repository retains shared-leaf modules and the
-NixOS bridge under `modules/home-manager/` and `modules/system/home-manager.nix`; it is
-not the source of the external leaf configuration.
+### Ownership rules
+
+- Omarchy owns its package/update/migration/snapshot lifecycle and Quickshell runtime.
+- Home Manager owns only explicitly declared user-owned paths.
+- Kubernetes owns portable long-running services by default.
+- Host-level configuration is reserved for boot, hardware, storage, networking,
+  SSH, k3s, GPUs/VFIO, and emergency recovery.
+- Nix packages and generated artifacts must not compete with Omarchy's system authority.
+
+
+**⚠️ IMPORTANT:** Reverb-OS is becoming the canonical combined flake. Its
+`homeConfigurations.omarchy` output is the standalone Home Manager profile for
+Omarchy. The separate `home-manager-config` repository remains a transitional
+source for existing NixOS host outputs until its portable modules are migrated
+and classified.
 
 | Project | Location | Purpose |
 |---------|----------|---------|
@@ -94,29 +136,28 @@ See [`docs/current-state.md`](docs/current-state.md) for the repository's curren
 
 ## Configuration Structure
 
-```
-/etc/nixos/
-├── flake.nix                  # Main flake + host definitions + project inputs
-│                                 home-manager-config is a pinned flake input
-├── hosts/                     # Host-specific NixOS configurations
-│   ├── zephyr/
-│   ├── nexus/
-│   ├── forge/
-│   └── sentry/
-├── modules/                   # Reusable NixOS modules
-│   ├── common-host-defaults.nix
-│   ├── system/                # System-level modules incl. HM bridge
-│   │   └── home-manager.nix   # Bridges to home-manager-config flake input
-│   ├── services/
-│   ├── desktop/
-│   └── gaming/
-└── secrets/                   # Encrypted secret material (SecretSpec/sops-nix paths)
+```text
+Reverb-OS/
+├── flake.nix                  # Nix packages, checks, current NixOS outputs, inputs
+├── hosts/                     # transitional NixOS host configurations
+├── modules/                   # legacy NixOS modules and retained reusable logic
+├── packages/ pkgs/ overlays/  # reusable Nix packages and build inputs
+├── kubernetes/                # Kubernetes/Easykubenix declarations
+├── contracts/                 # host and service contracts
+├── tests/                     # checks and migration validation
+├── docs/plans/                # active architecture and migration plans
+└── .research/                 # cited design research
+
+Target runtime ownership is split across this repo, the upstream Omarchy
+installation, and the standalone `homeConfigurations.omarchy` output. This tree
+now contains the installable user-profile entry point while NixOS outputs remain
+transitional.
 ```
 
-> Home Manager leaf modules (fish, starship, niri, alacritty, …) live in
-> [`reverb256/home-manager-config`](https://github.com/reverb256/home-manager-config).
-> This repository keeps the NixOS bridge in `modules/system/home-manager.nix` and
-> consumes the external modules through the `home-manager-config` flake input.
+> Portable Home Manager modules, including the Omarchy Niri composition, live
+> under `modules/home-manager/` and are exposed through
+> `homeConfigurations.omarchy`. Existing host-specific leaf modules remain in
+> `home-manager-config` during the migration.
 
 ## Key Documentation
 
@@ -138,31 +179,40 @@ See [`docs/current-state.md`](docs/current-state.md) for the repository's curren
 
 ## Home Manager
 
-User-environment configuration is managed by a separate flake:
-[`reverb256/home-manager-config`](https://github.com/reverb256/home-manager-config).
+User configuration for Omarchy is managed by the standalone
+`homeConfigurations.omarchy` output from this flake. The target is standalone
+Home Manager on upstream Omarchy, not the current NixOS module bridge.
 
-- Canonical leaf modules: `reverb256/home-manager-config/modules/*.nix`
-- nixos-config consumes it as the `home-manager-config` flake input
-- Local `modules/home-manager/` contains only retained shared-leaf modules, not the external leaf configuration
-- Bridge: `modules/system/home-manager.nix` (NixOS activation path)
-- `homeConfigurations.<host>` in `flake.nix` uses `inputs.home-manager-config.modules.standalone.nix`
+Home Manager may own:
 
-Standalone HM build / activation:
+- shell, prompt, editor, and terminal configuration;
+- additive user packages;
+- user services;
+- application configuration outside Omarchy-owned paths;
+- user themes, templates, hooks, menu extensions, and reviewed plugins.
+
+Home Manager must not initially own `/usr/share/omarchy`, Omarchy migrations,
+package updates, generated theme state, or the complete Hyprland/Quickshell
+configuration trees.
+
+The standalone profile is now available for isolated testing:
+
 ```bash
-# From nixos-config (NixOS activation path)
-nix build .#homeConfigurations.zephyr.activationPackage
+# Build without activating
+nix build .#homeConfigurations.omarchy.activationPackage
 
-# From home-manager-config directly
-cd /home/j_kro/Projects/home-manager-config
-home-manager switch --flake .#zephyr
-
-# From wrapper (plain switch on zephyr)
-cd ~/.config/home-manager
-home-manager switch
+# Bootstrap or activate on an Omarchy host
+home-manager switch --flake /home/j_kro/Projects/Reverb-OS#omarchy
 ```
+
+The legacy `home-manager-config` repository remains available for existing
+NixOS host profiles while its unique modules are migrated and classified.
 
 ## See Also
 
-- [NixOS Manual](https://nixos.org/manual/nixos/stable/)
+- [Upstream Omarchy Quattro repository](https://github.com/basecamp/omarchy/tree/quattro)
+- [Omarchy manual](https://github.com/basecamp/omarchy/tree/quattro/manual)
+- [Omarchy ISO project](https://github.com/omacom-io/omarchy-iso/tree/quattro)
 - [Home Manager Manual](https://nix-community.github.io/home-manager/)
-- [Flakes Guide](https://nixos.wiki/wiki/Flakes)
+- [Nix Flakes Guide](https://nixos.wiki/wiki/Flakes)
+- [Unified Reverb-OS Home Manager design](docs/superpowers/specs/2026-08-21-unified-omarchy-home-manager-flake-design.md)

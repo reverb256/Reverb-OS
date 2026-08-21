@@ -1,5 +1,5 @@
 {
-  description = "NixOS configuration with Garage and Syncthing storage";
+  description = "Reverb-OS cluster flake with standalone Home Manager profiles for Omarchy";
 
   inputs = {
     # Pinned to the lock rev for multi-host build reproducibility. When colmena
@@ -61,8 +61,9 @@
     home-manager = {
       url = "git+https://github.com/nix-community/home-manager";
     };
-    # home-manager-config - standalone Home Manager configuration (Layer 2)
-    # Migrated from modules/home-manager/ to separate flake per 3-layer model.
+    # Legacy host profiles remain pinned during migration. The standalone
+    # `homeConfigurations.omarchy` output below does not reference this input,
+    # so Omarchy installs do not pull the legacy NixOS/HM dependency graph.
     home-manager-config = {
       url = "git+https://github.com/reverb256/home-manager-config";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -269,6 +270,25 @@
             inherit inputs self;
           };
 
+          # Standalone Omarchy profile. This composition is intentionally
+          # independent of the legacy home-manager-config output and does not
+          # evaluate NixOS, Colmena, or cluster modules.
+          omarchySystem = "x86_64-linux";
+          omarchyPkgs = import nixpkgs {
+            system = omarchySystem;
+            config.allowUnfree = true;
+            overlays = [inputs.niri.overlays.niri];
+          };
+          omarchyHome = home-manager.lib.homeManagerConfiguration {
+            pkgs = omarchyPkgs;
+            extraSpecialArgs = {inherit inputs;};
+            modules = [
+              inputs.niri.homeModules.config
+              ./modules/home-manager/omarchy.nix
+              ./modules/home-manager/niri-omarchy.nix
+            ];
+          };
+
           # HOST DEFINITIONS - derived from the canonical typed inventory.
           # hostName: matches ./hosts/<n>/ and networking.hostName
           # targetHost: colmena targetHost (IP/hostname for remote, null = local)
@@ -322,12 +342,16 @@
 
           overlays.default = import ./overlays/default.nix {inherit inputs;};
 
-          # OUTPUT 4: homeConfigurations — consumed from standalone home-manager-config flake
-          # Layer 2 of the 3-layer model (NixOS / Home Manager / nix profile).
-          # The standalone flake manages its own inputs (nixcord, zen-browser,
-          # stylix, niri) and patches (noctalia SDR brightness). It exposes homeConfigurations
-          # keyed by hostName (zephyr/nexus/forge/sentry) for colmena deployment.
-          homeConfigurations = inputs.home-manager-config.homeConfigurations;
+          # OUTPUT 4: Home Manager configurations.
+          # Keep the existing host-named outputs for legacy NixOS hosts while
+          # adding the independent Omarchy profile. Selecting `.omarchy` does
+          # not import any legacy module; the compatibility entries remain
+          # available until each host profile is migrated and retired.
+          homeConfigurations =
+            home-manager-config.homeConfigurations
+            // {
+              omarchy = omarchyHome;
+            };
         };
 
         # ── OUTPUT 5: checks — source-level test suite (runs via `nix flake check`)
@@ -385,6 +409,7 @@
             layer-interface-contract = mkCheck "layer-interface-contract" ./tests/layer-interface-contract.nix;
             inventory-compliance = mkCheck "inventory-compliance" ./tests/inventory-compliance.nix;
             dendritic-parity = mkCheck "dendritic-parity" ./tests/dendritic-parity.nix;
+            omarchy-home-manager = mkCheck "omarchy-home-manager" ./tests/omarchy-home-manager.nix;
           };
 
           # EXISTING OUTPUTS (maintain compatibility)

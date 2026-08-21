@@ -1,139 +1,137 @@
 # Home Harmonization Plan
-# Declarative /home/j_kro across Zephyr, Nexus, Forge, Sentry
-#
-# Goal: Centralize config, preserve critical data, standardize environments
 
-## Architecture
+> **Target base:** upstream Omarchy/Arch with standalone Home Manager from Reverb-OS.
 
-```
-Declarative (home-manager)     →  .config/*, dotfiles
-Persistent (preservation)      →  SSH, GPG, Zen Browser, .agents
-Data (no management)            →  ~/models, ~/projects, .cache, .local
-```
+> **Status:** Active migration plan
+> **Last Verified:** 2026-08-20
+> **Owner:** j_kro
+> **Runtime status:** The live hosts remain NixOS until the standalone Omarchy profiles pass isolated tests.
 
-## Backup Plan
+## Goal
 
-### Zephyr (5.9M home - CRITICAL before void)
-```bash
-# Backup to Nexus
-BACKUP_DATE=$(date +%Y%m%d)
-ssh zephyr 'tar -czf - /home/j_kro' | \
-  ssh nexus "sudo dd of=/data/backups/zephyr-${BACKUP_DATE}/home.tar.gz bs=4M"
+Provide a consistent user environment across the cluster while preserving
+Omarchy's ownership model:
 
-# Verify
-ssh nexus "tar -tzf /data/backups/zephyr-${BACKUP_DATE}/home.tar.gz | head -20"
-```
+```text
+Omarchy/Arch
+  owns the base OS, package/update lifecycle, Hyprland, Quickshell, migrations,
+  snapshots, and hardware integration
 
-### Nexus (288G home - SELECTIVE backup)
-```bash
-# Only backup config, not data
-BACKUP_DATE=$(date +%Y%m%d)
-ssh nexus 'tar -czf - /home/j_kro/.config /home/j_kro/.bashrc /home/j_kro/.vimrc' | \
-  ssh nexus "sudo dd of=/data/backups/nexus-${BACKUP_DATE}/home-config.tar.gz bs=4M"
+Standalone Home Manager
+  owns the additive user layer and supported Omarchy extensions
 
-# Skip: ~/models (94G), ~/projects (1.2G), .cache (28G), .local (126G)
+Preserved data
+  remains outside declarative replacement and is backed up independently
 ```
 
-## Implementation
+This plan does not make Home Manager a NixOS replacement or a root/system
+configuration manager.
 
-### 1. Add home-manager to modules/default.nix
-```nix
-imports = [
-  # ...
-  ./home-manager/default.nix  # Shared home-manager config
-];
+## Ownership rules
+
+### Omarchy owns
+
+- `/usr/share/omarchy`;
+- Omarchy package files and update hooks;
+- `omarchy update`, migrations, snapshots, and package lifecycle;
+- generated theme state under `~/.local/state/omarchy/current/`;
+- the base Hyprland and Quickshell runtime;
+- boot, drivers, system services, hardware, and networking.
+
+### Home Manager may own
+
+- `~/.bashrc` and prompt configuration;
+- editor and terminal configuration after path ownership is verified;
+- user-only packages;
+- user services that do not need root, early boot, or physical devices;
+- application configuration outside Omarchy-owned paths;
+- user themes, templates, hooks, menu extensions, and reviewed plugins;
+- explicit user-owned Omarchy files after an ownership-transfer decision.
+
+### Home Manager must not initially own
+
+- `/usr/share/omarchy`;
+- the complete `~/.config/hypr/` tree;
+- the complete `~/.config/quickshell/` tree;
+- Omarchy migrations or update configuration;
+- generated theme state;
+- system-wide secrets, mounts, firewalls, k3s, GPUs, or storage.
+
+## Data preservation
+
+The following remain data, not Home Manager-generated replacement targets:
+
+- `~/models`;
+- project checkouts and working trees;
+- caches;
+- browser profiles and user application state;
+- SSH keys;
+- GPG keys;
+- agent state;
+- wallet and credential material;
+- cluster backups and operational artifacts.
+
+Backups and restoration procedures must remain separate from HM activation and
+must be tested against the current storage layout. Never put private keys or
+plaintext credentials in a profile, image, Nix store output, or documentation.
+
+## Profile shape
+
+The Reverb-OS flake should expose explicit Omarchy target profiles rather than
+assuming that every host has the same desktop:
+
+```text
+omarchy                    generic Omarchy additive layer with Niri
+omarchy-zephyr              Zephyr-specific additive layer after generic acceptance
+omarchy-nexus               server/compute compatibility layer
+omarchy-forge               GPU/compute compatibility layer
+omarchy-sentry              monitoring/recovery compatibility layer
 ```
 
-### 2. Update preservation.nix (already done)
-```nix
-users.j_kro = {
-  directories = [
-    { directory = ".ssh"; mode = "0700"; }
-    { directory = ".gnupg"; mode = "0700"; }
-    ".config"  # Home-manager config
-    ".local/share"  # User app state
-    ".agents"  # Agent state
-    "tplink-backups"  # Router backups (Zephyr only)
-  ];
-  files = [
-    ".screenrc"
-    ".gtkrc-2.0.backup"
-  ];
-};
-```
+The names describe intended target profiles. They do not mean that the live
+hosts have migrated or that a non-workstation profile is official upstream
+Omarchy. Each profile needs an explicit package, service, data, and recovery
+contract.
 
-### 3. Per-host configuration
+## Migration sequence
 
-#### Zephyr (gaming workstation)
-- Declarative: Wayfire, Steam, Discord, OBS
-- Persistent: tplink-backups
-- Data: Gaming files (not managed)
+1. Keep the NixOS Home Manager bridge as rollback-only compatibility.
+2. Create a standalone `omarchy` HM composition in the Reverb-OS flake with no NixOS-only options.
+3. Test it in the disposable upstream Omarchy guest.
+4. Record the writer set for every proposed managed path.
+5. Activate shell, editor, terminal, user packages, and non-conflicting services.
+6. Add supported Omarchy extensions one at a time: themes, templates, hooks,
+   menu extensions, and reviewed plugins.
+7. Transfer ownership of an Omarchy user file only when its update and rollback
+   behavior is tested.
+8. Build host-specific profiles for Zephyr, Nexus, Forge, Sentry, and the test
+   guest.
+9. Migrate one host at a time only after host prerequisites and Kubernetes
+   dependencies have independent rollback paths.
 
-#### Nexus (AI server)
-- Declarative: AI tools, dev config, podman
-- Persistent: AI model configs (not models themselves)
-- Data: ~/models (94G), ~/projects (1.2G)
+## Acceptance criteria
 
-#### Forge (mining)
-- Declarative: Mining tools config
-- Persistent: Mining pool configs
-- Data: Mining output (not managed)
+A profile is ready for wider use only when it proves:
 
-#### Sentry (monitoring)
-- Declarative: Monitoring dashboards, scripts
-- Persistent: Zen Browser (crypto wallets - CRITICAL)
-- Data: Logs (already in /var/log)
+- standalone HM evaluation on upstream Omarchy;
+- first activation with an explicit backup policy;
+- no replacement of Omarchy-owned paths;
+- idempotent repeated activation;
+- user services start and stop cleanly;
+- Omarchy's CLI and update behavior remain intact;
+- file ownership is documented;
+- preserved data is not treated as disposable configuration;
+- rollback behavior is understood;
+- the test guest is destroyed after validation.
 
-## Migration Steps
+A headless guest does not prove Quickshell rendering, Hyprland visual parity,
+GPU behavior, audio, or hardware recovery. Those require a later graphical or
+passthrough test class.
 
-### Phase 1: Backup (NOW)
-1. ✅ Zephyr home to Nexus
-2. ✅ Nexus config to Nexus
-3. ✅ Sentry data (already done)
+## Related documents
 
-### Phase 2: Setup home-manager (NEXT)
-1. Add home-manager module to modules/default.nix
-2. Test on Sentry (about to be reformatted)
-3. Migrate Zen Browser from Zephyr to Sentry
-
-### Phase 3: Apply to all hosts
-1. Zephyr: Apply after reinstall
-2. Nexus: Apply in-place (risk - test first)
-3. Forge: Apply in-place (risk - test first)
-
-### Phase 4: Clean up
-1. Remove old config files from home
-2. Verify preservation module works
-3. Test generation rollback
-
-## Critical Data
-
-### Zen Browser (Crypto Wallets)
-- Location: /home/j_kro/.config/zen
-- Backup: /data/backups/sentry-20260531/zen-browser-profile.tar.gz
-- Preserved by: preservation module
-- NOT managed by: home-manager
-
-### SSH Keys
-- Location: /home/j_kro/.ssh
-- Preserved by: preservation module
-
-### GPG Keys
-- Location: /home/j_kro/.gnupg
-- Preserved by: preservation module
-
-### Agent Configs
-- Location: /home/j_kro/.agents
-- Preserved by: preservation module
-
-## Testing Checklist
-
-- [ ] Zephyr home backed up
-- [ ] Nexus config backed up
-- [ ] Sentry data backed up (✅ done)
-- [ ] home-manager module added
-- [ ] Build succeeds for all hosts
-- [ ] Zen Browser test restore
-- [ ] SSH keys survive generation rollback
-- [ ] GPG keys survive generation rollback
-- [ ] Agent configs survive generation rollback
+- [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](docs/plans/2026-08-20-omarchy-hm-cluster-vision.md)
+- [`docs/current-state.md`](docs/current-state.md)
+- [`../home-manager-config/README.md`](../home-manager-config/README.md)
+- [`./.research/omarchy-design-philosophy-2026-08-20.md`](./.research/omarchy-design-philosophy-2026-08-20.md)
+- [`./.research/omarchy-home-manager-microvm-patterns-2026-08-20.md`](./.research/omarchy-home-manager-microvm-patterns-2026-08-20.md)

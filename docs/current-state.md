@@ -1,18 +1,28 @@
-# NixOS Cluster Current State
+# Reverb-OS Current State and Omarchy Migration Boundary
+
+> **Target base:** upstream Omarchy/Arch with standalone Home Manager from Reverb-OS.
 
 > **Status:** Active reference
-> **Last Verified:** 2026-08-13 (repository structure and checked-in configuration)
+> **Last Verified:** 2026-08-20 (checked-in architecture and target design)
 > **Owner:** j_kro
-> **Live-state rule:** This document describes the checked-in architecture. Verify host health and deployed generations with the commands below before making claims about runtime state.
+> **Live-state rule:** This document describes checked-in configuration and migration intent. Verify host health and deployed generations with live commands before making claims about runtime state.
+
+> **Migration notice:** The live cluster is still NixOS. Upstream Omarchy/Arch plus standalone Home Manager is the target runtime, not yet a claim about deployed hosts.
 
 ## Purpose
 
-This is the short, current-state reference for humans and agents. It separates checked-in
-configuration from live cluster observations so stale generated snapshots and historical
-audits are not mistaken for the current deployment.
+This is the short current-state reference for humans and agents. It separates checked-in
+configuration, migration target, and live cluster observations so stale generated
+snapshots and historical audits are not mistaken for the current deployment.
 
-- **Configuration truth:** the checked-out Git revision in `/etc/nixos` and the
-  `home-manager-config` flake input.
+The target architecture is documented in
+[`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](plans/2026-08-20-omarchy-hm-cluster-vision.md).
+The Omarchy design evidence is in
+[`../.research/omarchy-design-philosophy-2026-08-20.md`](../.research/omarchy-design-philosophy-2026-08-20.md).
+
+- **Configuration truth:** the checked-out Git revision in `/etc/nixos`, the
+  Reverb-OS flake outputs, and the separately pinned legacy
+  `home-manager-config` profile only where a NixOS host still consumes it.
 - **Deployment truth:** the active NixOS generation and service state on each host.
 - **Kubernetes truth:** the live API server for runtime state; the applicable
   Nix/Easykubenix source, raw/bootstrap manifest, Helm chart, or operator configuration
@@ -23,16 +33,28 @@ audits are not mistaken for the current deployment.
 
 ## Repository and workflow
 
-This repository is the Layer 1 NixOS configuration for a four-host cluster. User
-configuration is Layer 2 in the separate `home-manager-config` repository; high-churn
-user tools are Layer 3 in the user Nix profile.
+This repository is currently the NixOS evaluator and cluster declaration for a
+four-host cluster. During migration it is also the preserved package, test,
+Kubernetes, contract, and rollback source. It is not the permanent authority for
+the Omarchy desktop.
 
-Normal workflow:
+Target workflow:
+
+```text
+Omarchy installer/update → base OS, packages, migrations, snapshots, Quickshell
+standalone Home Manager → additive user layer and supported extensions
+Nix/Lix CI → packages, HM evaluation, cache, manifests, tests, provenance
+Kubernetes → portable cluster services by default
+```
+
+Current NixOS workflow remains:
 
 ```text
 issue → dedicated worktree → change → parse/check/test → PR → merge to main
-→ Nexus-dispatched canary/deploy → provenance and health verification
+→ guarded deployment only when explicitly authorized → provenance and health verification
 ```
+
+Do not use this documentation change to deploy or to claim that a host has migrated.
 
 Operational commands are defined in `justfile`. In particular:
 
@@ -67,19 +89,34 @@ authoritative.
 
 ## Configuration boundaries
 
-- **NixOS:** `/etc/nixos`, including `hosts/`, `modules/`, `kubernetes/`, `packages/`,
-  `pkgs/`, `scripts/`, and contracts.
-- **Home Manager:** `/home/j_kro/Projects/home-manager-config`, consumed through the
-  `home-manager-config` flake input. Niri user configuration and keybinds live there.
+### Target authority
+
+- **Omarchy/Arch:** base OS, package/update lifecycle, migrations, snapshots,
+  boot, hardware, Hyprland, and Quickshell.
+- **Home Manager:** this flake's `homeConfigurations.omarchy`, activated standalone
+  on upstream Omarchy. It owns only additive user packages, portable dotfiles,
+  user services, and Niri configuration that Omarchy does not provide. The
+  separate `home-manager-config` repository remains transitional for legacy hosts.
+- **Nix/Lix:** packages, overlays, development shells, cache policy, HM evaluation,
+  checks, manifests, contracts, and test artifacts. It must not silently overwrite
+  Omarchy-owned paths.
+- **Kubernetes:** portable long-running services by default.
+- **Host platform layer:** boot, hardware, storage, networking, SSH/recovery, k3s,
+  GPU/VFIO, and other privileged operations that cannot move into Kubernetes or HM.
+- **NixOS:** current live evaluator and rollback path until each host replacement is
+  tested. Do not add new permanent Omarchy desktop ownership here.
+
+### Shared boundaries
+
 - **Secrets:** SecretSpec is the runtime resolution path; sops-nix remains a compatibility
   path until the planned Phase 3 removal. Never put plaintext secrets in documentation.
 - **PKI and SSH:** the checked-in CA certificate is the fleet trust anchor; private
   signing keys are provisioned at runtime. SSH host trust is CA-based where configured.
-- **Kubernetes:** prefer Nix/Easykubenix modules and the typed service/host contracts.
-  Raw manifests must identify whether they are live, bootstrap-only, test, generated,
-  vendor, or archived.
-- **Persistence/recovery:** persistent hosts use the checked-in Preservation modules;
-  recovery and rescue procedures must be tested against the current boot/storage layout.
+- **Kubernetes:** prefer Nix/Easykubenix modules and typed service/host contracts. Raw
+  manifests must identify whether they are live, bootstrap-only, test, generated, vendor,
+  or archived.
+- **Persistence/recovery:** preserve user data independently from Omarchy root snapshots;
+  Omarchy rollback restores the root filesystem but deliberately does not roll back `/home`.
 
 ## Documentation routing
 
@@ -88,7 +125,9 @@ authoritative.
 | Safety rules and agent behavior | [`AGENTS.md`](../AGENTS.md) | Canonical policy |
 | Contribution/worktree/PR workflow | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Canonical workflow |
 | Repository navigation | [`../DOCUMENTATION_INDEX.md`](../DOCUMENTATION_INDEX.md) | Canonical catalog |
-| Current checked-in architecture | This document | Current reference |
+| Current checked-in architecture and migration boundary | This document | Current reference |
+| Unified Reverb-OS Home Manager target architecture | [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](plans/2026-08-20-omarchy-hm-cluster-vision.md) | Active design target |
+| Omarchy design evidence | [`../.research/omarchy-design-philosophy-2026-08-20.md`](../.research/omarchy-design-philosophy-2026-08-20.md) | Cited research |
 | Live host/Kubernetes health | `just health`, `just status`, `just provenance` | Runtime state, not prose |
 | Deployment procedure | `justfile`, `docs/ci-cd/README.md`, verified rescue/deploy runbooks | Commands must match source |
 | Secrets architecture | [`../SOPS-NIX.md`](../SOPS-NIX.md), `secretspec.toml`, and host SecretSpec wiring | Verify before rotation |

@@ -1,31 +1,44 @@
-# NixOS Cluster — Agent Guidelines
+# Reverb-OS — Agent Guidelines
 
-> **Last reviewed:** 2026-08-16 · Source branch: `main` · Verify live state with `just health`.
+> **Target base:** upstream Omarchy/Arch with standalone Home Manager from Reverb-OS.
 
-Flake-based NixOS configuration for a 4-host cluster (Zephyr, Nexus, Forge,
-Sentry). This file holds the universal rules, style, and conventions. Task
-procedures live in `agents/skills/`; deep reference lives in `docs/reference/`
-and `docs/current-state.md`. Read the matching guide before starting work.
+> **Last reviewed:** 2026-08-20 · Source branch: `main` · Verify live state with `just health`.
 
-## 🔴 HARD RULE: declarative only — never imperative
+This repository is migrating a 4-host cluster (Zephyr, Nexus, Forge, Sentry)
+from NixOS-first operation to upstream Omarchy/Arch with standalone Home Manager.
+The live fleet remains NixOS until each host has a tested replacement. This file
+holds universal rules, style, and authority boundaries. Task procedures live in
+`agents/skills/`; deep reference lives in `docs/reference/` and
+`docs/current-state.md`.
 
-**All persistent NixOS state lives in `.nix` files under git.** Shell commands on
-a running host are only acceptable for reading state. They are never acceptable
-for configuring services, fixing bugs, attaching devices, changing networking,
-editing secrets, or patching running daemons.
+Read the target architecture in
+[`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](docs/plans/2026-08-20-omarchy-hm-cluster-vision.md)
+before changing desktop, host, or Home Manager ownership.
 
-The workflow for any NixOS change:
+The design principles are non-negotiable: preserve Omarchy's opinionated
+workstation model, Quickshell integration, supported update transaction,
+mutable-but-recoverable system, and package-owned/user-owned path split.
+Do not turn Omarchy into a generic NixOS-style artifact reconciler.
+Read the matching guide before starting work.
 
-1. Edit the `.nix` file on Zephyr (the source-of-truth host, normally in an issue worktree).
-2. Validate with `just check` and the relevant build/test recipe.
-3. Merge the reviewed change to `main`.
-4. Deploy with `just deploy [<host>]`.
+## 🔴 HARD RULE: preserve the active authority boundary
 
-The live host is a *consumer* of the config, never the source of truth. A running
-host is a rolled-back snapshot.
+**During the migration, all persistent NixOS state remains in `.nix` files under
+git.** Shell commands on a running NixOS host are acceptable only for reading
+state. They are never acceptable for configuring services, fixing bugs, attaching
+devices, changing networking, editing secrets, or patching running daemons.
 
-**This rule is the #1 most expensive recurring failure pattern.** If your first
-instinct is to SSH into a host and run a command, stop — find the `.nix` file.
+For target Omarchy hosts, use the authority appropriate to the layer:
+
+- Omarchy owns its package/update/migration/snapshot lifecycle; Reverb-OS defers to it.
+- Home Manager owns only declared user-owned paths.
+- Nix builds and validates artifacts; it does not silently replace Omarchy-owned state.
+- Kubernetes owns portable cluster services by default.
+- Root host configuration is limited to boot, hardware, storage, networking, SSH,
+  k3s, privileged devices, and emergency recovery.
+
+The live host is never the source of truth. If the first instinct is to SSH in and
+patch a service, stop and find the declarative source or supported upstream Omarchy command.
 
 ## Quick start
 
@@ -45,14 +58,17 @@ just new-worktree <NNN> # create a worktree for issue NNN
 
 ## Configuration layers
 
-| Layer | Where | Owns |
-|-------|-------|------|
-| 1 — NixOS | this repo (`reverb256/nixos-config`) | hosts, services, networking, hardware, deployment |
-| 2 — Home Manager | `github:reverb256/home-manager-config` (flake input) | user config, niri settings/keybinds, app configs |
-| 3 — nix profile | `nix profile` | high-churn binaries (Hermes, Freebuff) — never collide with Layer 2 |
+| Layer | Target authority | Owns |
+|-------|------------------|------|
+| 1 — Omarchy/Arch | upstream Omarchy + explicit host profile | OS substrate, packages, updates, migrations, snapshots, hardware, Hyprland, Quickshell |
+| 2 — Home Manager | this flake's `homeConfigurations.omarchy` | additive user packages, portable dotfiles, user services, and Niri; defer to Omarchy for built-ins |
+| 3 — Nix/Lix | this repo and reusable package flakes | package builds, cache policy, HM evaluation, checks, manifests, development shells |
+| 4 — Kubernetes | `kubernetes/` and manifests | portable cluster services by default |
+| Legacy — NixOS | this repo during migration | current live host evaluator and rollback path; not the target desktop authority |
 
-`just hm-switch` activates the current host's standalone HM output;
-`just hm-build <host>` dry-builds it.
+`just hm-switch` and `just hm-build <host>` remain legacy NixOS-host helpers.
+Use `home-manager switch --flake .#omarchy` for the standalone Omarchy profile.
+Do not add new NixOS-only desktop ownership while this migration is in progress.
 
 ## Safety rules
 
@@ -137,8 +153,11 @@ See `agents/skills/add-k8s-workload.md`.
 
 ## Workflow
 
-`main` is integration **and** production. All work goes through
-issue → worktree → PR → squash-merge → `just deploy`. Full procedure in
+`main` is integration **and** production for the current NixOS deployment path.
+All work goes through issue → worktree → PR → squash-merge → controlled deployment.
+Do not deploy as part of the Omarchy migration design or test work. The target
+workflow will use Omarchy's supported update path for the base, standalone HM for
+user state, and Kubernetes for portable services. Full current procedure is in
 `agents/skills/worktree-and-pr.md`.
 
 ## Writing style

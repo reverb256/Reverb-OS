@@ -30,6 +30,7 @@ historical reports or generated snapshots into current operating procedures.
 | Resource placement | Nexus is the default workload/build target; Zephyr is protected from non-infrastructure workload pressure. | [`docs/kubernetes/zephyr-ram-protection-policy.md`](kubernetes/zephyr-ram-protection-policy.md), `modules/system/distributed-builds.nix`, `kubernetes/cluster.nix` |
 | Security backlog | Open hardening work and recorded rationale stay in the consolidated action-item table. | [`ACTION-ITEMS.md`](../ACTION-ITEMS.md#decision-log) |
 | Host wiring | Dendritic flake-parts pattern (Variant B path-import); shared `lib/dendritic-host.nix` evaluator for `nixosConfigurations` + `colmena`; classic shim dissolved 2026-08-13. | [`../modules/hosts/`](../modules/hosts/), [`../lib/dendritic-host.nix`](../lib/dendritic-host.nix), [`../contracts/host-inventory.nix`](../contracts/host-inventory.nix), [`../AGENTS.md`](../AGENTS.md) |
+| Omarchy + Reverb-OS Home Manager | Use upstream Omarchy/Arch as the base, Reverb-OS `homeConfigurations.omarchy` as the additive standalone Home Manager layer, Nix as package/cache/test tooling, and Kubernetes as the default service layer. Retain NixOS as rollback until each profile is tested. | [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](plans/2026-08-20-omarchy-hm-cluster-vision.md), [`docs/current-state.md`](current-state.md), [Omarchy design research](../.research/omarchy-design-philosophy-2026-08-20.md) |
 
 ## Historical and superseded decisions
 

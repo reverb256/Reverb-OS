@@ -1,11 +1,29 @@
 # Cluster architecture reference
 
-**Last Verified:** 2026-08-16
-**Status:** Reference
+> **Target base:** upstream Omarchy/Arch with standalone Home Manager from Reverb-OS.
+
+**Last Verified:** 2026-08-20
+**Status:** Reference / migration transition
 **Owner:** j_kro
 
-Reference for host wiring, repository layout, build architecture, and the
-self-hosted CI runner. Task procedures live in `agents/skills/`.
+Reference for the current NixOS host wiring, target Omarchy ownership,
+repository layout, build architecture, and the self-hosted CI runner. The live
+fleet remains NixOS until the target profiles pass isolated tests. Task
+procedures live in `agents/skills/`.
+
+## Target authority model
+
+```text
+Omarchy/Arch  → base OS, packages, updates, migrations, snapshots, hardware, Quickshell
+Home Manager  → additive user config and supported Omarchy extensions
+Nix/Lix       → packages, cache, checks, flakes, manifests, test artifacts
+Kubernetes    → portable cluster services by default
+NixOS         → transitional evaluator and rollback path
+```
+
+Omarchy remains the coherent product authority. Preserve its shell, update
+transaction, and ownership boundaries. Do not make a root reconciler overwrite
+`/usr/share/omarchy` or other Omarchy-owned state. See [`../plans/2026-08-20-omarchy-hm-cluster-vision.md`](../plans/2026-08-20-omarchy-hm-cluster-vision.md).
 
 ## Hosts
 
@@ -20,6 +38,11 @@ Resources: 78 cores, 123GB RAM, 7 GPUs, ~8.4TB. K3s roles run on Nexus, Forge,
 and Sentry; Zephyr is not a K3s node.
 
 ## Repository layout
+
+The current tree is still shaped as a NixOS evaluator. During migration,
+`packages/`, `pkgs/`, `overlays/`, `kubernetes/`, `contracts/`, `tests/`, and
+CI remain valuable. `hosts/` and most NixOS modules are transitional until
+replaced by explicit Omarchy host profiles.
 
 ```
 /etc/nixos/
@@ -54,6 +77,10 @@ host declarations. Adding a host = one entry in `contracts/host-inventory.nix` +
 
 ## Build architecture
 
+Nix remains the package/build/cache/test toolchain for the target platform; it
+is not the target Omarchy host activation authority. The current NixOS system
+build remains available as the migration rollback path.
+
 - System target is generic `x86_64-linux`; not a global `-march=x86-64-v3` userspace.
 - CachyOS kernel packages are x86-64-v3; only selected llama.cpp packages add it.
 - `big-parallel` is a builder capability label, not an arch target or thread count.
@@ -61,6 +88,13 @@ host declarations. Adding a host = one entry in `contracts/host-inventory.nix` +
   `max-jobs=0` and dispatch to Nexus. Sentry publishes cachix only.
 - `modules/system/distributed-builds.nix` generates `/etc/nix/machines` and
   excludes the current host.
+
+## Service placement policy
+
+Kubernetes is the default home for portable long-running services. Keep a
+service on the host only when it is required for boot/recovery, storage,
+network identity, SSH, k3s, physical GPU/VFIO access, or operation during a
+Kubernetes outage. Home Manager is not a root service manager.
 
 ## Self-hosted GitHub Actions runner
 

@@ -1,15 +1,19 @@
-# NixOS Cluster Documentation Index
+# Reverb-OS Documentation Index
+
+> **Target base:** upstream Omarchy/Arch with standalone Home Manager from Reverb-OS.
 
 **Status:** Canonical catalog
 **Owner:** j_kro
-**Last Verified:** 2026-08-16
+**Last Verified:** 2026-08-20
 **Scope:** Repository documentation navigation; not a live cluster-health report
 **Current-state reference:** [`docs/current-state.md`](docs/current-state.md)
+**Migration target:** [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](docs/plans/2026-08-20-omarchy-hm-cluster-vision.md)
 **Most recent broad audit indexed:** [`docs/audit-2026-07-27.md`](docs/audit-2026-07-27.md)
 
-Complete index of the NixOS cluster documentation. Migration plans and dated audits are
+Complete index of the Reverb-OS cluster documentation. The live fleet is still
+NixOS during the upstream Omarchy + standalone Home Manager migration. Migration plans and dated audits are
 historical/planning context unless explicitly re-verified. Use `docs/current-state.md`
-for the authority boundaries and `just health`/`just provenance` for live claims.
+for authority boundaries and `just health`/`just provenance` for live claims.
 
 ---
 
@@ -35,7 +39,10 @@ for the authority boundaries and `just health`/`just provenance` for live claims
 |----------|---------|----------|
 | **Decision record index** | Architectural decisions, rationale, and source links | [`docs/DECISION_LOG.md`](docs/DECISION_LOG.md) |
 | **Decision table** | Current open/completed decisions and rationale | [`ACTION-ITEMS.md`](ACTION-ITEMS.md#decision-log) |
-| **Current state** | Checked-in architecture and documentation authority boundaries | `docs/current-state.md` |
+| **Current state** | Checked-in architecture, live NixOS transition, and authority boundaries | [`docs/current-state.md`](docs/current-state.md) |
+| **Unified Reverb-OS Home Manager design** | Standalone Home Manager output, Omarchy ownership boundary, Niri profile, and migration sequence | [`docs/plans/2026-08-20-omarchy-hm-cluster-vision.md`](docs/plans/2026-08-20-omarchy-hm-cluster-vision.md) |
+| **Omarchy philosophy research** | First-party Omarchy principles, ownership model, update transaction, and extension surfaces | [`.research/omarchy-design-philosophy-2026-08-20.md`](.research/omarchy-design-philosophy-2026-08-20.md) |
+| **Omarchy isolated test research** | Official ISO/QEMU pattern, standalone HM examples, and microVM trade-offs | [`.research/omarchy-home-manager-microvm-patterns-2026-08-20.md`](.research/omarchy-home-manager-microvm-patterns-2026-08-20.md) |
 | **AI stack analysis** | Current AI architecture, provider policy, and benchmark baseline | [`docs/AI_STACK_ANALYSIS.md`](docs/AI_STACK_ANALYSIS.md) |
 | **AI stack refactor plan** | Proposed local/NVIDIA/Hermes/NemoClaw migration stages | [`docs/ai-stack-refactor-plan-2026-08-12.md`](docs/ai-stack-refactor-plan-2026-08-12.md) |
 | **Ops postmortem 2026-08-14** | Backup wedge (173G), deploy-chain failures, SSH CA pitfalls, dendritic eval quirk, gitlawb input fix | [`docs/ops-postmortem-2026-08-14.md`](docs/ops-postmortem-2026-08-14.md) |
@@ -179,6 +186,7 @@ dated audits and archived reports remain historical evidence.
 
 ### Quick Reference
 - **Status:** K3s configuration is checked in; consult `docs/current-state.md` and run live health commands before making runtime claims
+- **Target platform:** upstream Omarchy/Arch + Reverb-OS standalone Home Manager; this is not yet deployed to the live fleet
 - **Kubernetes:** K3s configuration and version declarations live in the checked-in Nix modules;
   verify the exact deployed version before making runtime claims.
 - **Topology:** 4 configured hosts — Zephyr, Nexus, Forge, and Sentry

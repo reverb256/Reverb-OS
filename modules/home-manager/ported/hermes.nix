@@ -27,7 +27,7 @@ in {
     enable = lib.mkEnableOption "Hermes Agent user state (skeleton dirs + HERMES_HOME)";
 
     hermesHome = lib.mkOption {
-      type = lib.types.path;
+      type = lib.types.str;
       default = "~/.hermes";
       description = "Hermes state directory (HERMES_HOME).";
     };
@@ -50,20 +50,18 @@ in {
       HERMES_HOME = cfg.hermesHome;
     };
 
-    # Directory skeleton — additive, non-conflicting with Omarchy or Hermes.
-    home.file = lib.mkMerge [
-      (lib.mkIf (cfg.hermesHome != null) {
-        ".hermes/sessions" = {d = {};};
-        ".hermes/memories" = {d = {};};
-        ".hermes/skills" = {d = {};};
-        ".hermes/cron" = {d = {};};
-        ".hermes/logs" = {d = {};};
-      })
-      (lib.listToAttrs (map (p: {
-          name = ".hermes/profiles/${p}";
-          value = {d = {};};
-        })
-        cfg.profileNames))
-    ];
+    # Directory skeleton via activation (HM home.file has no dir-creation
+    # option in this version). Idempotent, additive, non-conflicting.
+    home.activation.createHermesDirs = lib.hm.dag.entryAfter ["writeBoundary"] ''
+      run() {
+        HERMES_HOME="$HOME/.hermes"
+        mkdir -p "$HERMES_HOME"/{sessions,memories,skills,cron,logs}
+        ${
+          builtins.concatStringsSep "\n"
+          (map (p: "mkdir -p \"$HERMES_HOME/profiles/${p}\"") cfg.profileNames)
+        }
+      }
+      run
+    '';
   };
 }

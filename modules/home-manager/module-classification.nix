@@ -7,6 +7,9 @@
     "desktop-utilities.nix"
     "dolphin.nix"
     "firefox-pwa-apps.nix"
+    # hermes-skin.nix (2026-08-21): stylix-dependent → Omarchy owns theming.
+    # A future Omarchy-theme → Hermes-skin bridge can restore it.
+    "hermes-skin.nix"
     "icon-theme.nix"
     "mime-apps.nix"
     "mime-fix.nix"
@@ -29,7 +32,8 @@
     "gl-desktop-entry.nix"
     "helix-desktop-entry.nix"
     "hermes-gateway.nix"
-    "hermes-skin.nix"
+    # hermes-skin.nix moved to deferToOmarchy 2026-08-21: it generates the
+    # Hermes skin from stylix colors; stylix is deferred to Omarchy theming.
     "home-manager-launcher.nix"
     "lazygit.nix"
     "memlawb.nix"
@@ -75,11 +79,31 @@
     omarchy = [
       "omarchy.nix"
       "niri-omarchy.nix"
+      "rclone.nix"
+      # Ported portableAdditive modules (2026-08-21)
+      "ported/caprine.nix"
+      "ported/copyq.nix"
+      "ported/editorconfig.nix"
+      "ported/freebuff-desktop.nix"
+      "ported/git.nix"
+      "ported/gl-desktop-entry.nix"
+      "ported/helix-desktop-entry.nix"
+      "ported/hermes-gateway.nix"
+      "ported/lazygit.nix"
+      "ported/memlawb.nix"
+      "ported/nixcord-config.nix"
+      "ported/opencode.nix"
+      "ported/ssh-flatten.nix"
+      "ported/tmux.nix"
+      "ported/tui-apps.nix"
+      "ported/vesktop.nix"
+      "ported/zen-browser.nix"
     ];
   };
   profileOwnedModules = [
     "omarchy.nix"
     "niri-omarchy.nix"
+    "rclone.nix"
   ];
 
   # Snapshot of the legacy module names used by the migration check. This

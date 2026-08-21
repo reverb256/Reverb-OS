@@ -281,11 +281,39 @@
           };
           omarchyHome = home-manager.lib.homeManagerConfiguration {
             pkgs = omarchyPkgs;
-            extraSpecialArgs = {inherit inputs;};
+            # hostName lets host-aware modules (hermes-gateway, etc.) decide
+            # defaults. The generic omarchy profile targets the workstation
+            # (zephyr); per-host overrides come later via omarchy-<host>.
+            extraSpecialArgs = {inherit inputs; hostName = "zephyr";};
             modules = [
               inputs.niri.homeModules.config
+              inputs.nixcord.homeModules.nixcord
+              inputs.zen-browser.homeModules.twilight
               ./modules/home-manager/omarchy.nix
               ./modules/home-manager/niri-omarchy.nix
+              ./modules/home-manager/rclone.nix
+              # Ported portableAdditive modules (2026-08-21 rebuild)
+              ./modules/home-manager/ported/caprine.nix
+              ./modules/home-manager/ported/copyq.nix
+              ./modules/home-manager/ported/editorconfig.nix
+              ./modules/home-manager/ported/freebuff-desktop.nix
+              ./modules/home-manager/ported/git.nix
+              ./modules/home-manager/ported/gl-desktop-entry.nix
+              ./modules/home-manager/ported/helix-desktop-entry.nix
+              ./modules/home-manager/ported/hermes-gateway.nix
+              # hermes-skin.nix deferred: it generates the Hermes skin from
+              # stylix colors (config.lib.stylix). Stylix is deferred to Omarchy
+              # (Omarchy owns theming); a future Omarchy-theme → Hermes-skin
+              # bridge can replace it.
+              ./modules/home-manager/ported/lazygit.nix
+              ./modules/home-manager/ported/memlawb.nix
+              ./modules/home-manager/ported/nixcord-config.nix
+              ./modules/home-manager/ported/opencode.nix
+              ./modules/home-manager/ported/ssh-flatten.nix
+              ./modules/home-manager/ported/tmux.nix
+              ./modules/home-manager/ported/tui-apps.nix
+              ./modules/home-manager/ported/vesktop.nix
+              ./modules/home-manager/ported/zen-browser.nix
             ];
           };
 

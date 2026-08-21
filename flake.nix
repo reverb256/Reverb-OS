@@ -286,11 +286,11 @@
             # (zephyr); per-host overrides come later via omarchy-<host>.
             extraSpecialArgs = {inherit inputs; hostName = "zephyr";};
             modules = [
-              inputs.niri.homeModules.config
+              # Base Omarchy experience: Hyprland + Quickshell are Omarchy's
+              # own (no niri in the omarchy profile — see direction 2026-08-21).
               inputs.nixcord.homeModules.nixcord
               inputs.zen-browser.homeModules.twilight
               ./modules/home-manager/omarchy.nix
-              ./modules/home-manager/niri-omarchy.nix
               ./modules/home-manager/rclone.nix
               # Ported portableAdditive modules (2026-08-21 rebuild)
               ./modules/home-manager/ported/caprine.nix
@@ -371,15 +371,16 @@
           overlays.default = import ./overlays/default.nix {inherit inputs;};
 
           # OUTPUT 4: Home Manager configurations.
-          # Keep the existing host-named outputs for legacy NixOS hosts while
-          # adding the independent Omarchy profile. Selecting `.omarchy` does
-          # not import any legacy module; the compatibility entries remain
-          # available until each host profile is migrated and retired.
-          homeConfigurations =
-            home-manager-config.homeConfigurations
-            // {
-              omarchy = omarchyHome;
-            };
+          # The Omarchy profile is the migration target and is fully
+          # standalone: it does NOT depend on the private home-manager-config
+          # input, so it builds on any Omarchy host without GitHub auth.
+          # Legacy host-named outputs remain available (for rollback) under
+          # `homeConfigurationsLegacy` — NOT merged into `homeConfigurations`,
+          # so selecting `.omarchy` never forces fetching the private repo.
+          homeConfigurations = {
+            omarchy = omarchyHome;
+          };
+          homeConfigurationsLegacy = home-manager-config.homeConfigurations;
         };
 
         # ── OUTPUT 5: checks — source-level test suite (runs via `nix flake check`)

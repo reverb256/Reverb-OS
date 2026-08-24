@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -82,7 +82,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -100,7 +100,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -145,7 +145,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Fail on hardcoded /home/j_kro paths (issue #309)
         run: |
@@ -197,7 +197,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -263,7 +263,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
@@ -296,7 +296,7 @@ jobs:
       - name: Upload SARIF
         if: always() && github.event_name != 'pull_request' && hashFiles('results.sarif') != ''
         # pin:github/codeql-action/upload-sarif@v3
-        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28
         with:
           sarif_file: results.sarif
 
@@ -314,7 +314,7 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 

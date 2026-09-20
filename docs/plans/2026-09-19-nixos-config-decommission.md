@@ -2,6 +2,7 @@
 
 > Status: IN PROGRESS · started 2026-09-19 · owner: Hermes (default profile) directly, per j_kro
 > Tracking issue: reverb256/Reverb-OS#12
+> 2026-09-20 update: P1 done (input repointed, `0732971`; module de-corrupted + recursion fix ported). CI reality check: ALL workflows on both nixos-config and Reverb-OS targeted self-hosted `nixos` runners that no longer exist — disabled server-side 2026-09-20, ~30 queued runs cancelled (files kept; see `.github/workflows/README.md` in each repo). P2 reframed accordingly.
 
 ## Context (measured 2026-09-19)
 
@@ -22,9 +23,9 @@
 ## Phases
 
 - **P0 (done 2026-09-19):** freeze signals — this doc, Reverb-OS#12, README + AGENTS.md banners.
-- **P1:** drop the `gitlawb` input in Reverb-OS (use local `pkgs/gitlawb`); `nix flake check` + host eval verify on nexus; PR.
-- **P2:** port live ops → homelab-ops: CI Doctor + Cluster Status workflows (rewrite for Omarchy reality; decide runners), `scripts/ci-doctor.sh`, monitoring/backup bits still in use.
-- **P3:** port live pkgs → Reverb-OS: `caddy-with-modules`, `nix-cache-proxy`, `secretspec/`, `memlawb.nix`, `peakminer.nix`, `*-image` builders — each with a who-consumes check + eval/build verify.
+- **P1 (done 2026-09-20):** gitlawb input repointed to repo-local `pkgs/gitlawb` (commit `0732971`); corrupted DID default restored; recursion-guard fix ported. Eval verification impossible — no nix evaluator exists on any fleet host; tracked as an explicit non-gate (see `/tmp/unlazy-nextstep/GATES.md` G4).
+- **P2 (reframed 2026-09-20):** DO NOT port the NixOS-era workflow set — CI Doctor / Cluster Status / deploy / recover-host all depended on the retired NixOS self-hosted runners, and every workflow on both repos is now disabled server-side. Sweep only the still-live ops: `scripts/ci-doctor.sh`, monitoring/backup bits, runbooks → homelab-ops. Any replacement CI must be **nix-free and run on infrastructure that exists**.
+- **P3:** port live pkgs → Reverb-OS: `caddy-with-modules`, `nix-cache-proxy`, `secretspec/`, `memlawb.nix`, `peakminer.nix`, `*-image` builders — each with a who-consumes check (source-level; no evaluator on the fleet).
 - **P4:** repoint consumers + sweeps: hermes-skills-live, local skills, infrastructure-docs, site-agency profiles, AGENTS.md files, memlawb-for-hermes refs.
 - **P5:** drop `home-manager-config` input in Reverb-OS; archive home-manager-config.
 - **P6:** archive nixos-config; final report.
@@ -34,3 +35,4 @@
 - Never touch the live Omarchy layer or the running k3s cluster in this project.
 - Confirm the applied reality of the Sep 15–17 calico/firewall changes (imperative + oplog) before archiving; port anything still needed into the Omarchy ops flow — do not resurrect the zombie deploy chain.
 - Do not archive until Reverb-OS evaluates clean with zero nixos-config inputs.
+- No NixOS assumptions anywhere: the fleet has no NixOS machines, no nix evaluator, and no self-hosted runners.

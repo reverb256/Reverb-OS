@@ -193,12 +193,16 @@
     # secretspec 0.17.0 with native sops provider is available directly.
 
     # gitlawb - local option-4 flake: packages + overlay + NixOS module
-    # Fetched as a subdirectory of this repo (dir=). A plain path:./pkgs/gitlawb
+    # Fetched as a subdirectory of THIS repo (dir=). A plain path:./pkgs/gitlawb
     # input breaks when the flake is fetched remotely (deploy-nexus fetches
     # origin/main -> 'cannot fetch input ... relative path' blocked every
     # host eval 2026-08-14). dir= resolves from GitHub in both contexts.
+    # 2026-09-20 (Path B): repointed from the retiring nixos-config repo to
+    # this repo's own pkgs/gitlawb copy. NOTE: flake.lock still pins the old
+    # nixos-config rev — run `nix flake update gitlawb` on an evaluator to
+    # relock (no evaluator exists on the fleet post-Omarchy; container/CI).
     gitlawb = {
-      url = "git+https://github.com/reverb256/nixos-config?dir=pkgs/gitlawb";
+      url = "git+https://github.com/reverb256/Reverb-OS?dir=pkgs/gitlawb";
     };
 
     # preservation - ephemeral-root persistence (sentry/nexus /persistent symlinks).

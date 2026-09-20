@@ -43,7 +43,7 @@ in {
     gitRemote = {
       did = mkOption {
         type = types.str;
-        default = "did:key:<<REDACTED>>";
+        default = "did:key:z6MkroUt2u1koQcx6fLmvRnyayoeuHrvzQWShqshTP5Pe5e5";
         description = "DID root used for the gitlawb remote URL.";
       };
 
@@ -84,7 +84,12 @@ in {
       # -----------------------------------------------------------------
       # User / group
       # -----------------------------------------------------------------
-      users.users.${cfg.user} = mkIf (!config.users.users ? ${cfg.user}) {
+      # NOTE (2026-08-18, ported here 2026-09-20 during the Path B repoint):
+      # plain declarations, no `mkIf (!config.users.users ? ...)` guard — that
+      # guard is infinite recursion (the presence check evaluates the very
+      # option set this definition is a member of). The module system merges
+      # multiple definitions natively; declaring plainly is the correct idiom.
+      users.users.${cfg.user} = {
         description = "Gitlawb service user";
         home = cfg.dataDir;
         group = cfg.group;
@@ -92,7 +97,7 @@ in {
         createHome = false;
       };
 
-      users.groups.${cfg.group} = mkIf (!config.users.groups ? ${cfg.group}) {};
+      users.groups.${cfg.group} = {};
 
       # -----------------------------------------------------------------
       # Packages

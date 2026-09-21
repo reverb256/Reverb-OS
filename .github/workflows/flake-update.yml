@@ -50,11 +50,11 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup Cachix
         # pin:cachix/cachix-action@v17
-        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866
         with:
           name: reverb-os
           cachixBin: /run/current-system/sw/bin/cachix
@@ -102,11 +102,11 @@ jobs:
     steps:
       - name: Checkout
         # pin:actions/checkout@v5
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup Cachix
         # pin:cachix/cachix-action@v17
-        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866
         with:
           name: reverb-os
           cachixBin: /run/current-system/sw/bin/cachix
